@@ -43,7 +43,7 @@ def main() -> None:
     if os.geteuid() != 0:
         raise SystemExit("host_systemd_smoke.py must run as root")
     name = f"dev-host-smoke-{os.getpid()}"
-    unit = f"wsl-devctl-v2-host-{os.getpid()}.service"
+    unit = f"wsl-devctl-v3-host-{os.getpid()}.service"
     with tempfile.TemporaryDirectory(prefix="wsl-devctl-host-smoke-") as temporary:
         root = Path(temporary)
         root.chmod(0o755)

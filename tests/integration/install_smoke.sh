@@ -9,7 +9,7 @@ fi
 install -m 0755 /workspace/tests/integration/fake-systemctl /usr/local/bin/systemctl
 install -m 0755 /workspace/tests/integration/fake-rsync /usr/local/bin/rsync
 bash /workspace/scripts/install.sh --no-deps
-[[ $(/usr/local/bin/wsl-devctl --version) == "wsl-devctl 0.2.0" ]]
+[[ $(/usr/local/bin/wsl-devctl --version) == "wsl-devctl 0.3.0" ]]
 [[ -f /etc/systemd/system/wsl-dev-compose@.service ]]
 [[ -f /etc/wsl-devctl/examples/dev-next.toml ]]
 [[ -f /etc/wsl-devctl/examples/dev-docker-compose.toml ]]

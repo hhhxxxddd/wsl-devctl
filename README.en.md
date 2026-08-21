@@ -157,7 +157,7 @@ The default name is `dev-<directory-name>`. Override it when necessary:
 
 ```bash
 sudo wsl-devctl init 'C:\Users\you\source\my-app' \
-  --name dev-my-app \
+  --name local-my-app \
   --user "$USER" \
   --runtime auto \
   --fix \
@@ -172,18 +172,18 @@ Inspect projects, health, and logs:
 
 ```bash
 wsl-devctl list
-wsl-devctl show dev-my-app
-wsl-devctl status dev-my-app
-wsl-devctl logs -n 200 dev-my-app
-wsl-devctl logs -f dev-my-app
+wsl-devctl show local-my-app
+wsl-devctl status local-my-app
+wsl-devctl logs -n 200 local-my-app
+wsl-devctl logs -f local-my-app
 ```
 
 Start, stop, and restart:
 
 ```bash
-sudo wsl-devctl start dev-my-app
-sudo wsl-devctl stop dev-my-app
-sudo wsl-devctl restart dev-my-app
+sudo wsl-devctl start local-my-app
+sudo wsl-devctl stop local-my-app
+sudo wsl-devctl restart local-my-app
 ```
 
 `up` / `down` are aliases for `start` / `stop`.
@@ -191,9 +191,9 @@ sudo wsl-devctl restart dev-my-app
 Run one-shot maintenance:
 
 ```bash
-sudo wsl-devctl sync dev-my-app
-sudo wsl-devctl compile dev-my-app
-sudo wsl-devctl prepare dev-my-app
+sudo wsl-devctl sync local-my-app
+sudo wsl-devctl compile local-my-app
+sudo wsl-devctl prepare local-my-app
 ```
 
 The lifecycle commands have different scopes:
@@ -210,7 +210,7 @@ The lifecycle commands have different scopes:
 After dependency, lockfile, POM, branch, or project-structure changes, prefer:
 
 ```bash
-sudo wsl-devctl start --prepare dev-my-app
+sudo wsl-devctl start --prepare local-my-app
 ```
 
 ## Live reload by stack
@@ -271,14 +271,60 @@ Register an intentional update:
 sudo wsl-devctl register --force /path/to/dev-project.toml
 ```
 
+Forced registration with the same name stops affected runtime units, replaces the
+configuration atomically, and restores the previous runtime state. Add `--prepare`
+when POMs, lockfiles, dependencies, or prepare commands changed:
+
+```bash
+sudo wsl-devctl register --force --prepare /path/to/dev-project.toml
+```
+
+## Manage registered projects
+
+Update an existing registration explicitly by name:
+
+```bash
+sudo wsl-devctl update local-my-app /path/to/dev-project.toml
+sudo wsl-devctl update local-my-app /path/to/dev-project.toml --prepare
+```
+
+`update` keeps the name, source directory, and cache identity fixed. It preserves the
+project's previous running/stopped state, and restarts active workers so they load the
+new configuration instead of retaining an in-memory copy.
+
+Rename a registration:
+
+```bash
+sudo wsl-devctl rename local-old-name local-new-name
+```
+
+Renaming migrates internal state and restores previously active units without moving or
+copying the potentially large ext4 build cache. Docker Compose projects are brought down
+under the old identity before they are restored under the new one.
+
+Unregister while keeping the build cache for possible recovery:
+
+```bash
+sudo wsl-devctl unregister my-app
+```
+
+Delete the build cache only when it is no longer needed:
+
+```bash
+sudo wsl-devctl unregister my-app --purge-cache
+```
+
+`unregister` stops the project and removes its registration and internal state. It never
+deletes the Windows source workspace.
+
 ## Dependencies
 
 Normal `start`, `stop`, `sync`, and `restart` operations never install software. Only the installer
 and explicit `doctor --fix` calls perform dependency repair:
 
 ```bash
-wsl-devctl doctor dev-my-app
-sudo wsl-devctl doctor dev-my-app --fix
+wsl-devctl doctor local-my-app
+sudo wsl-devctl doctor local-my-app --fix
 ```
 
 Project declarations take priority: Maven Wrapper beats system Maven, `packageManager` and lockfiles
@@ -292,23 +338,24 @@ also be enabled manually in Docker Desktop.
 Start with three commands:
 
 ```bash
-wsl-devctl status dev-my-app
-wsl-devctl logs -n 200 dev-my-app
-wsl-devctl doctor dev-my-app
+wsl-devctl status local-my-app
+wsl-devctl logs -n 200 local-my-app
+wsl-devctl doctor local-my-app
 ```
 
 Then match the symptom:
 
 | Symptom | Suggested action |
 |---|---|
-| Required command or dependency is missing | `sudo wsl-devctl doctor dev-my-app --fix` |
-| A Windows edit did not reach WSL | `sudo wsl-devctl sync dev-my-app`, then inspect sync logs |
-| Dependencies, lockfiles, POMs, or branches changed | `sudo wsl-devctl start --prepare dev-my-app` |
-| A Java edit did not reload | `sudo wsl-devctl compile dev-my-app`, then inspect logs |
-| `recovery pending` appears | `sudo wsl-devctl start --prepare dev-my-app` |
+| Required command or dependency is missing | `sudo wsl-devctl doctor local-my-app --fix` |
+| A Windows edit did not reach WSL | `sudo wsl-devctl sync local-my-app`, then inspect sync logs |
+| Dependencies, lockfiles, POMs, or branches changed | `sudo wsl-devctl start --prepare local-my-app` |
+| A Java edit did not reload | `sudo wsl-devctl compile local-my-app`, then inspect logs |
+| `recovery pending` appears | `sudo wsl-devctl start --prepare local-my-app` |
 | A port is unreachable | Run `doctor` and inspect the reported port owner |
 | Compose will not start | Check `docker info`, `docker compose version`, and WSL Integration |
 | `list` reports `INVALID` | Fix the TOML and re-register with `--force` |
+| Tasks still use old settings after a config edit | Use `update` or `register --force` so active workers reload |
 
 If preparation or a branch rebuild fails, the runtime stays stopped instead of continuing with a
 partially updated dependency graph. Fix the cause and repeat `start --prepare`.
@@ -335,7 +382,7 @@ sudo bash scripts/install.sh --no-deps
 Stop registered projects before uninstalling:
 
 ```bash
-sudo wsl-devctl stop dev-my-app
+sudo wsl-devctl stop local-my-app
 sudo bash scripts/uninstall.sh
 ```
 

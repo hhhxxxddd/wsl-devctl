@@ -152,7 +152,7 @@ sudo wsl-devctl init 'C:\Users\you\source\my-app' --fix --start
 
 ```bash
 sudo wsl-devctl init 'C:\Users\you\source\my-app' \
-  --name dev-my-app \
+  --name local-my-app \
   --user "$USER" \
   --runtime auto \
   --fix \
@@ -167,18 +167,18 @@ sudo wsl-devctl init 'C:\Users\you\source\my-app' \
 
 ```bash
 wsl-devctl list
-wsl-devctl show dev-my-app
-wsl-devctl status dev-my-app
-wsl-devctl logs -n 200 dev-my-app
-wsl-devctl logs -f dev-my-app
+wsl-devctl show local-my-app
+wsl-devctl status local-my-app
+wsl-devctl logs -n 200 local-my-app
+wsl-devctl logs -f local-my-app
 ```
 
 启动、停止和重启：
 
 ```bash
-sudo wsl-devctl start dev-my-app
-sudo wsl-devctl stop dev-my-app
-sudo wsl-devctl restart dev-my-app
+sudo wsl-devctl start local-my-app
+sudo wsl-devctl stop local-my-app
+sudo wsl-devctl restart local-my-app
 ```
 
 `up` / `down` 是 `start` / `stop` 的别名。
@@ -186,9 +186,9 @@ sudo wsl-devctl restart dev-my-app
 手动同步、编译和重新准备：
 
 ```bash
-sudo wsl-devctl sync dev-my-app
-sudo wsl-devctl compile dev-my-app
-sudo wsl-devctl prepare dev-my-app
+sudo wsl-devctl sync local-my-app
+sudo wsl-devctl compile local-my-app
+sudo wsl-devctl prepare local-my-app
 ```
 
 几个容易混淆的命令：
@@ -205,7 +205,7 @@ sudo wsl-devctl prepare dev-my-app
 依赖、lockfile、POM、分支或项目结构变化后，优先使用：
 
 ```bash
-sudo wsl-devctl start --prepare dev-my-app
+sudo wsl-devctl start --prepare local-my-app
 ```
 
 ## 热更新如何工作
@@ -263,14 +263,56 @@ sudo wsl-devctl register /path/to/dev-project.toml
 sudo wsl-devctl register --force /path/to/dev-project.toml
 ```
 
+同名强制注册会停止受影响的运行单元、原子替换配置，然后恢复原来的运行状态。修改了
+POM、lockfile、依赖或准备命令时，加上 `--prepare`：
+
+```bash
+sudo wsl-devctl register --force --prepare /path/to/dev-project.toml
+```
+
+## 管理已注册项目
+
+明确指定现有名称更新配置，效果与同名 `register --force` 相同：
+
+```bash
+sudo wsl-devctl update local-my-app /path/to/dev-project.toml
+sudo wsl-devctl update local-my-app /path/to/dev-project.toml --prepare
+```
+
+`update` 要求名称、源码目录和缓存身份保持不变。它会保留项目更新前的运行/停止状态；
+运行中的 worker 会真正重启并读取新配置，不会继续使用内存中的旧配置。
+
+修改注册名称：
+
+```bash
+sudo wsl-devctl rename local-old-name local-new-name
+```
+
+改名会迁移内部状态并恢复原来正在运行的单元，但不会移动或复制可能很大的 ext4 构建缓存。
+Docker Compose 项目会先安全停止旧的 Compose 运行时，再以新身份恢复。
+
+取消注册默认保留构建缓存，方便之后恢复：
+
+```bash
+sudo wsl-devctl unregister my-app
+```
+
+只有明确不再需要构建缓存时才使用：
+
+```bash
+sudo wsl-devctl unregister my-app --purge-cache
+```
+
+`unregister` 会停止该项目、移除注册配置和内部状态，不会删除 Windows 源码。
+
 ## 依赖处理
 
 普通 `start`、`stop`、`sync` 和 `restart` 不会安装软件。只有安装器和显式的
 `doctor --fix` 会执行依赖修复：
 
 ```bash
-wsl-devctl doctor dev-my-app
-sudo wsl-devctl doctor dev-my-app --fix
+wsl-devctl doctor local-my-app
+sudo wsl-devctl doctor local-my-app --fix
 ```
 
 项目自身的声明优先：Maven Wrapper 优先于系统 Maven，`packageManager` 和 lockfile 决定
@@ -284,23 +326,24 @@ Docker Desktop 中手动启用。
 先运行这三个命令：
 
 ```bash
-wsl-devctl status dev-my-app
-wsl-devctl logs -n 200 dev-my-app
-wsl-devctl doctor dev-my-app
+wsl-devctl status local-my-app
+wsl-devctl logs -n 200 local-my-app
+wsl-devctl doctor local-my-app
 ```
 
 然后按症状处理：
 
 | 现象 | 建议操作 |
 |---|---|
-| 缺少命令或依赖 | `sudo wsl-devctl doctor dev-my-app --fix` |
-| Windows 文件没有同步 | `sudo wsl-devctl sync dev-my-app`，再查看 sync 日志 |
-| 修改了依赖、lockfile、POM 或分支 | `sudo wsl-devctl start --prepare dev-my-app` |
-| Java 修改没有触发重载 | `sudo wsl-devctl compile dev-my-app`，再查看日志 |
-| 出现 `recovery pending` | `sudo wsl-devctl start --prepare dev-my-app` |
+| 缺少命令或依赖 | `sudo wsl-devctl doctor local-my-app --fix` |
+| Windows 文件没有同步 | `sudo wsl-devctl sync local-my-app`，再查看 sync 日志 |
+| 修改了依赖、lockfile、POM 或分支 | `sudo wsl-devctl start --prepare local-my-app` |
+| Java 修改没有触发重载 | `sudo wsl-devctl compile local-my-app`，再查看日志 |
+| 出现 `recovery pending` | `sudo wsl-devctl start --prepare local-my-app` |
 | 端口无法访问 | 运行 `doctor`，根据报告检查端口占用者 |
 | Compose 无法启动 | 检查 `docker info`、`docker compose version` 和 WSL Integration |
 | `list` 显示 `INVALID` | 修正 TOML 后用 `register --force` 重新注册 |
+| 修改配置后运行任务仍像旧配置 | 使用 `update`，或使用 `register --force` 让运行单元重新加载 |
 
 准备或分支重建失败时，工具会让运行时保持停止，避免用不完整的依赖图继续运行。修复原因后
 执行 `start --prepare` 即可。
@@ -326,7 +369,7 @@ sudo bash scripts/install.sh --no-deps
 卸载前先停止所有已注册项目：
 
 ```bash
-sudo wsl-devctl stop dev-my-app
+sudo wsl-devctl stop local-my-app
 sudo bash scripts/uninstall.sh
 ```
 
