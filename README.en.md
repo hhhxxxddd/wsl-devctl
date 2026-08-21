@@ -5,22 +5,38 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![WSL](https://img.shields.io/badge/WSL-Ubuntu-4EAA25.svg)](https://learn.microsoft.com/windows/wsl/)
 
-`wsl-devctl` lets you keep using familiar Windows editors and folders while moving dependency
-installation, builds, development servers, and containers onto the WSL ext4 filesystem where they
-perform more naturally.
+`wsl-devctl` keeps source management on Windows while moving dependencies, builds, and runtimes to
+WSL ext4.
 
-It addresses two common problems:
+## Why wsl-devctl?
 
-- **Mounted-drive performance:** running directly under `/mnt/c` or `/mnt/d` can make
-  `node_modules`, Maven `target`, small-file scans, and file watching noticeably slower.
-- **Cross-filesystem live reload:** when source lives on Windows and the runtime lives in WSL,
-  watchers, dependency trees, symlinks, and compiler output can interfere with frontend HMR,
-  Python reload, or Java hot reload.
+Many Windows developers keep repositories in the Windows filesystem and use WSL to build, run, and
+verify them. Running a project directly under `/mnt/c` or `/mnt/d` is convenient, but it introduces
+several problems:
 
-`wsl-devctl` does not replace framework reload systems. It incrementally mirrors Windows source
-into WSL ext4 and launches the project's normal development server. Next.js, Vite, and React retain
-native HMR; FastAPI uses Uvicorn reload; Spring Boot uses coordinated Maven compilation and
-DevTools; other stacks use the watch command declared by the project.
+1. **Mounted-drive performance is limited**
+   `node_modules`, Maven `target`, Python environments, and other small-file-heavy directories are
+   usually faster on native WSL ext4 than under `/mnt/*`.
+
+2. **Live reload should not depend on one IDE**
+   Development entry points now include Cursor, Codex, Claude Code, and terminal workflows alongside
+   traditional IDEs. Compilation, process supervision, and live reload need to work independently
+   of the editor.
+
+3. **AI coding needs immediate feedback**
+   After AI changes code, the ideal loop is automatic sync, compile or reload, and immediate
+   verification—not manual copying, rebuilding, and restarting.
+
+`wsl-devctl` incrementally mirrors Windows source into a WSL ext4 workspace while preserving each
+project's native development experience:
+
+- Next.js, Vite, and React keep native HMR/Fast Refresh.
+- FastAPI uses Uvicorn reload.
+- Maven/Spring Boot uses a compiler watcher and DevTools.
+- Docker Compose and other stacks use their own watch or development commands.
+
+This preserves Windows repository management, avoids heavy I/O on mounted drives, and turns live
+reload into an editor-independent environment capability.
 
 ## How it works
 

@@ -5,19 +5,34 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![WSL](https://img.shields.io/badge/WSL-Ubuntu-4EAA25.svg)](https://learn.microsoft.com/windows/wsl/)
 
-`wsl-devctl` 让你继续在 Windows 中使用熟悉的编辑器和文件目录，同时把依赖安装、编译、
-开发服务器和容器运行放到更适合它们的 WSL ext4 文件系统中。
+`wsl-devctl` 让 Windows 负责保存和管理源码，让 WSL ext4 负责依赖、构建和运行。
 
-它主要解决两个常见问题：
+## 为什么需要 wsl-devctl？
 
-- **WSL 映射盘性能**：项目直接运行在 `/mnt/c`、`/mnt/d` 等 Windows 映射路径上时，
-  `node_modules`、Maven `target`、大量小文件扫描和文件监听往往较慢。
-- **跨文件系统热更新**：源码在 Windows、运行时在 WSL 时，文件监听、依赖目录、符号链接和
-  编译产物容易互相干扰，前端 HMR、Python reload 或 Java 热更可能变得不稳定。
+许多 Windows 开发者习惯把项目保存在 Windows 文件系统中，再通过 WSL 编译、运行和验证。
+最直接的方式是在 `/mnt/c`、`/mnt/d` 等挂载目录中运行项目，但它存在几个问题：
 
-`wsl-devctl` 不重写框架的热更新机制。它把 Windows 源码增量同步到 WSL ext4 镜像，再启动
-项目原本的开发服务器：Next.js/Vite/React 使用自己的 HMR，FastAPI 使用 Uvicorn reload，
-Spring Boot 使用 Maven 编译协调与 DevTools，其他技术栈使用你配置的 watch 命令。
+1. **映射盘性能有限**
+   `node_modules`、Maven `target`、Python 虚拟环境等包含大量小文件，直接在 `/mnt/*` 下安装
+   依赖和编译，性能通常不如 WSL 原生 ext4。
+
+2. **热更新不应依赖特定 IDE**
+   开发入口正在从传统 IDE 扩展到 Cursor、Codex、Claude Code 等工具。编译、进程托管和
+   热更新需要独立于编辑器运行。
+
+3. **AI 编程需要即时反馈**
+   AI 修改代码后，理想流程应该是自动同步、编译或热更新，然后立即验证结果，而不是手动
+   复制、构建和重启。
+
+`wsl-devctl` 将 Windows 源码增量同步到 WSL ext4 镜像，并保留项目原生的开发体验：
+
+- Next.js、Vite、React 使用原生 HMR/Fast Refresh。
+- FastAPI 使用 Uvicorn reload。
+- Maven/Spring Boot 使用编译 watcher 和 DevTools。
+- Docker Compose 和其他技术栈使用项目自己的 watch 或开发命令。
+
+这样既保留了 Windows 下的项目管理习惯，也绕开了映射盘的重型 I/O，并让热更新成为独立于
+IDE 的环境能力。
 
 ## 工作原理
 
