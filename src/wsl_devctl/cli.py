@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
 from . import __version__
-from .config import ProjectConfig, load_project, parse_project, read_toml
+from .config import ProjectConfig, load_project, parse_project, read_toml, validate_name
 from .controller import (
     UNIT_KINDS,
     compile_once,
@@ -55,6 +56,82 @@ def _write_registration(
     runtime.project_state(project.name).mkdir(parents=True, exist_ok=True)
     systemctl("daemon-reload")
     return destination
+
+
+def _active_kinds(project: ProjectConfig) -> list[str]:
+    return [kind for kind in UNIT_KINDS if unit_active(project.name, kind)]
+
+
+def _stop_kinds(name: str, kinds: list[str]) -> None:
+    selected = set(kinds)
+    for kind in reversed(UNIT_KINDS):
+        if kind in selected:
+            systemctl("stop", unit(name, kind))
+
+
+def _start_kinds(project: ProjectConfig, kinds: list[str]) -> None:
+    selected = set(kinds)
+    for kind in enabled_units(project):
+        if kind in selected:
+            systemctl("start", unit(project.name, kind))
+
+
+def _stop_compose_runtime(project: ProjectConfig, active: list[str]) -> None:
+    if project.runtime_driver != "compose" or "compose" not in active:
+        return
+    result = compose_down(project)
+    if result != 0:
+        raise DevctlError(f"docker compose down failed with exit code {result}")
+
+
+def _require_same_registration(current: ProjectConfig, replacement: ProjectConfig) -> None:
+    if replacement.name != current.name:
+        raise DevctlError(
+            f"replacement name must remain {current.name!r}; use rename to change project identity"
+        )
+    for label in ("source", "cache_root", "cache"):
+        if getattr(replacement, label) != getattr(current, label):
+            raise DevctlError(
+                f"update cannot change {label}; unregister the project before changing "
+                "storage identity"
+            )
+
+
+def _update_registration(
+    runtime: RuntimePaths,
+    current: ProjectConfig,
+    replacement: ProjectConfig,
+    content: str,
+    *,
+    prepare: bool,
+) -> None:
+    _require_same_registration(current, replacement)
+    active = _active_kinds(current)
+    _stop_kinds(current.name, active)
+    try:
+        _stop_compose_runtime(current, active)
+        _write_registration(runtime, replacement, content, force=True)
+        if active or prepare:
+            sync_once(replacement)
+            if prepare:
+                prepare_all(runtime, replacement)
+            save_git_state(runtime, replacement, git_snapshot(replacement))
+        _start_kinds(replacement, active)
+    except DevctlError:
+        log("update failed; affected runtime services remain stopped")
+        raise
+
+
+def _validated_tree(path: Path, root: Path, label: str) -> Path:
+    resolved_root = root.resolve(strict=False)
+    resolved = path.resolve(strict=False)
+    if resolved == resolved_root or resolved_root not in resolved.parents:
+        raise DevctlError(f"refusing to remove {label} outside its managed root: {resolved}")
+    if path.is_symlink():
+        raise DevctlError(f"refusing to remove symbolic-link {label}: {path}")
+    if path.exists() and not path.is_dir():
+        raise DevctlError(f"expected {label} to be a directory: {path}")
+    return path
 
 
 def _start_project(runtime: RuntimePaths, project: ProjectConfig, *, prepare: bool) -> None:
@@ -107,8 +184,21 @@ def cmd_init(args: argparse.Namespace) -> None:
         return
     require_root("init")
     runtime = paths()
-    destination = _write_registration(runtime, project, content, force=args.force)
-    log(f"initialized {project.name}: {destination}")
+    destination = runtime.config_path(project.name)
+    updated = destination.exists() and args.force
+    if updated:
+        current = load_project(project.name, runtime)
+        _update_registration(
+            runtime,
+            current,
+            project,
+            content,
+            prepare=args.start,
+        )
+    else:
+        destination = _write_registration(runtime, project, content, force=args.force)
+    action = "updated" if updated else "initialized"
+    log(f"{action} {project.name}: {destination}")
     log(f"detected: {', '.join(detection.labels())}")
     if args.fix:
         remaining = apply_dependency_fixes(project)
@@ -120,7 +210,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         for line in describe_plan(plan):
             log(f"dependency needed: {line}")
     if args.start:
-        _start_project(runtime, project, prepare=True)
+        _start_project(runtime, project, prepare=not updated)
 
 
 def cmd_register(args: argparse.Namespace) -> None:
@@ -130,8 +220,133 @@ def cmd_register(args: argparse.Namespace) -> None:
     raw = read_toml(source)
     project = parse_project(raw)
     content = source.read_text(encoding="utf-8")
+    destination = runtime.config_path(project.name)
+    if destination.exists() and args.force:
+        current = load_project(project.name, runtime)
+        _update_registration(
+            runtime,
+            current,
+            project,
+            content,
+            prepare=args.prepare,
+        )
+        log(f"updated {project.name}: {destination}")
+        return
     destination = _write_registration(runtime, project, content, force=args.force)
+    if args.prepare:
+        sync_once(project)
+        prepare_all(runtime, project)
+        save_git_state(runtime, project, git_snapshot(project))
     log(f"registered {project.name}: {destination}")
+
+
+def cmd_update(args: argparse.Namespace) -> None:
+    require_root("update")
+    runtime = paths()
+    current = load_project(args.name, runtime)
+    source = Path(args.config).resolve(strict=True)
+    replacement = parse_project(read_toml(source))
+    _update_registration(
+        runtime,
+        current,
+        replacement,
+        source.read_text(encoding="utf-8"),
+        prepare=args.prepare,
+    )
+    log(f"updated {current.name}: {runtime.config_path(current.name)}")
+
+
+def cmd_rename(args: argparse.Namespace) -> None:
+    require_root("rename")
+    runtime = paths()
+    validate_name(args.new_name)
+    current = load_project(args.name, runtime)
+    if current.name == args.new_name:
+        raise DevctlError("old and new project names are identical")
+
+    old_config = runtime.config_path(current.name)
+    new_config = runtime.config_path(args.new_name)
+    old_state = runtime.project_state(current.name)
+    new_state = runtime.project_state(args.new_name)
+    if new_config.exists():
+        raise DevctlError(f"target project is already registered: {args.new_name}")
+    if new_state.exists():
+        raise DevctlError(f"target project state already exists: {new_state}")
+
+    raw = read_toml(old_config)
+    raw["name"] = args.new_name
+    # Project names are labels. Renaming must not duplicate or move a potentially
+    # large ext4 cache, so make the existing cache identity explicit.
+    raw["cache_root"] = str(current.cache_root)
+    raw["cache"] = str(current.cache)
+    replacement = parse_project(raw)
+    content = render_toml(raw)
+    temporary = new_config.with_suffix(".toml.tmp")
+
+    active = _active_kinds(current)
+    _stop_kinds(current.name, active)
+    state_moved = False
+    committed = False
+    try:
+        _stop_compose_runtime(current, active)
+        temporary.write_text(content, encoding="utf-8")
+        temporary.chmod(0o644)
+        if old_state.exists():
+            os.replace(old_state, new_state)
+            state_moved = True
+        else:
+            new_state.mkdir(parents=True, exist_ok=False)
+        os.replace(temporary, new_config)
+        old_config.unlink()
+        committed = True
+        systemctl("daemon-reload")
+        for kind in UNIT_KINDS:
+            systemctl("reset-failed", unit(current.name, kind), check=False)
+        _start_kinds(replacement, active)
+    except (DevctlError, OSError) as exc:
+        temporary.unlink(missing_ok=True)
+        if not committed:
+            if new_config.exists() and old_config.exists():
+                new_config.unlink(missing_ok=True)
+            if state_moved and new_state.exists() and not old_state.exists():
+                os.replace(new_state, old_state)
+            elif new_state.exists() and not state_moved:
+                new_state.rmdir()
+            _start_kinds(current, active)
+            log("rename failed before commit; original registration was restored")
+        else:
+            log("rename completed, but one or more runtime services failed to restart")
+        if isinstance(exc, DevctlError):
+            raise
+        raise DevctlError(f"rename failed: {exc}") from exc
+    log(f"renamed {current.name} -> {replacement.name}; cache preserved at {replacement.cache}")
+
+
+def cmd_unregister(args: argparse.Namespace) -> None:
+    require_root("unregister")
+    runtime = paths()
+    project = load_project(args.name, runtime)
+    state = _validated_tree(runtime.project_state(project.name), runtime.state_root, "state")
+    cache = None
+    if args.purge_cache:
+        cache = _validated_tree(project.cache, project.cache_root, "cache")
+
+    active = _active_kinds(project)
+    _stop_kinds(project.name, active)
+    _stop_compose_runtime(project, active)
+    try:
+        if cache is not None and cache.exists():
+            shutil.rmtree(cache)
+        if state.exists():
+            shutil.rmtree(state)
+        runtime.config_path(project.name).unlink()
+    except OSError as exc:
+        raise DevctlError(f"cannot remove registration: {exc}") from exc
+    for kind in UNIT_KINDS:
+        systemctl("reset-failed", unit(project.name, kind), check=False)
+    systemctl("daemon-reload")
+    suffix = "cache removed" if cache is not None else f"cache preserved at {project.cache}"
+    log(f"unregistered {project.name}; {suffix}")
 
 
 def cmd_list(_args: argparse.Namespace) -> None:
@@ -305,7 +520,21 @@ def parser() -> argparse.ArgumentParser:
     register = sub.add_parser("register", help="validate and install a TOML project config")
     register.add_argument("config")
     register.add_argument("--force", action="store_true")
+    register.add_argument("--prepare", action="store_true")
     register.set_defaults(func=cmd_register)
+    update = sub.add_parser("update", help="replace a registered config and preserve runtime state")
+    update.add_argument("name")
+    update.add_argument("config")
+    update.add_argument("--prepare", action="store_true")
+    update.set_defaults(func=cmd_update)
+    rename = sub.add_parser("rename", help="rename a registration without moving its build cache")
+    rename.add_argument("name")
+    rename.add_argument("new_name")
+    rename.set_defaults(func=cmd_rename)
+    unregister = sub.add_parser("unregister", help="stop and remove a project registration")
+    unregister.add_argument("name")
+    unregister.add_argument("--purge-cache", action="store_true")
+    unregister.set_defaults(func=cmd_unregister)
     listing = sub.add_parser("list", help="list registered projects")
     listing.set_defaults(func=cmd_list)
     for name, func in (
