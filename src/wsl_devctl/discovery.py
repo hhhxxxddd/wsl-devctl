@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,8 +38,15 @@ class Detection:
     package_file: Path | None = None
     framework: str | None = None
     package_manager: str | None = None
+    frontend_port: int | None = None
     pom_file: Path | None = None
+    spring_boot_pom: Path | None = None
     spring_boot: bool = False
+    spring_boot_port: int = 8080
+    spring_boot_profile: str | None = None
+    spring_boot_version: str | None = None
+    maven_watch: tuple[Path, ...] = ()
+    classpath_modules: tuple[Path, ...] = ()
     pyproject_file: Path | None = None
     fastapi: bool = False
 
@@ -74,7 +83,7 @@ def normalize_source(value: str) -> Path:
 
 def default_name(source: Path) -> str:
     slug = re.sub(r"[^a-z0-9._-]+", "-", source.name.lower()).strip("-._")
-    value = f"dev-{slug or 'project'}"[:63]
+    value = f"local-{slug or 'project'}"[:63]
     validate_name(value)
     return value
 
@@ -145,6 +154,143 @@ def _package_details(path: Path, boundary: Path) -> tuple[str | None, str]:
     return framework, "npm"
 
 
+def _frontend_port(package_file: Path, framework: str | None) -> int | None:
+    root = package_file.parent
+    variable = "VITE_PORT" if framework == "vite" else "PORT"
+    for path in (root / ".env.local", root / ".env.development", root / ".env"):
+        if not path.is_file():
+            continue
+        match = re.search(
+            rf"(?m)^\s*{re.escape(variable)}\s*=\s*['\"]?(\d+)",
+            path.read_text(encoding="utf-8", errors="ignore"),
+        )
+        if match:
+            return int(match.group(1))
+    if framework != "vite":
+        return None
+    for path in sorted(root.glob("vite.config.*")):
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern in (
+            r"['\"]VITE_PORT['\"]\s*,\s*['\"](\d+)['\"]",
+            r"\bport\s*:\s*(\d+)",
+        ):
+            match = re.search(pattern, content)
+            if match:
+                return int(match.group(1))
+    return None
+
+
+def _xml_root(path: Path) -> ET.Element | None:
+    try:
+        return ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return None
+
+
+def _direct_text(root: ET.Element, name: str) -> str | None:
+    node = root.find(f"{{*}}{name}")
+    if node is None or not node.text or not node.text.strip():
+        return None
+    return node.text.strip()
+
+
+def _pom_details(path: Path) -> tuple[str | None, str, set[str]]:
+    root = _xml_root(path)
+    if root is None:
+        return None, "jar", set()
+    artifact = _direct_text(root, "artifactId")
+    packaging = _direct_text(root, "packaging") or "jar"
+    dependencies = {
+        node.text.strip()
+        for node in root.findall("./{*}dependencies/{*}dependency/{*}artifactId")
+        if node.text and node.text.strip()
+    }
+    return artifact, packaging, dependencies
+
+
+def _spring_boot_module(poms: list[Path]) -> Path | None:
+    candidates = []
+    marker = "<artifactId>spring-boot-maven-plugin</artifactId>"
+    for path in poms:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        if marker not in content:
+            continue
+        has_application = any((path.parent / "src/main/resources").glob("application*"))
+        candidates.append((not has_application, len(path.parts), str(path), path))
+    return min(candidates)[-1] if candidates else None
+
+
+def _spring_boot_properties(pom: Path) -> tuple[int, str | None]:
+    resources = pom.parent / "src/main/resources"
+    profile = "local" if any(resources.glob("application-local.*")) else None
+    names = (
+        "application-local.yaml",
+        "application-local.yml",
+        "application-dev.yaml",
+        "application-dev.yml",
+        "application.yaml",
+        "application.yml",
+        "application.properties",
+    )
+    for name in names:
+        path = resources / name
+        if not path.is_file():
+            continue
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        if path.suffix == ".properties":
+            match = re.search(r"(?m)^\s*server\.port\s*=\s*(\d+)", content)
+        else:
+            match = re.search(r"(?ms)^server:\s*\n(?:[ \t]+.*\n)*?[ \t]+port:\s*(\d+)", content)
+        if match:
+            return int(match.group(1)), profile
+    return 8080, profile
+
+
+def _spring_boot_version(poms: list[Path]) -> str | None:
+    for path in poms:
+        root = _xml_root(path)
+        if root is None:
+            continue
+        node = root.find("./{*}properties/{*}spring.boot.version")
+        if node is not None and node.text and node.text.strip():
+            return node.text.strip()
+    return None
+
+
+def _maven_dependency_paths(
+    poms: list[Path], boot_pom: Path, source: Path
+) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+    metadata = {path: _pom_details(path) for path in poms}
+    by_artifact = {
+        artifact: path
+        for path, (artifact, _packaging, _dependencies) in metadata.items()
+        if artifact
+    }
+    selected: set[Path] = {boot_pom}
+    pending = [boot_pom]
+    while pending:
+        current = pending.pop()
+        for artifact in metadata[current][2]:
+            dependency = by_artifact.get(artifact)
+            if dependency is not None and dependency not in selected:
+                selected.add(dependency)
+                pending.append(dependency)
+    source_roots = tuple(
+        path.parent / "src/main"
+        for path in sorted(selected, key=str)
+        if (path.parent / "src/main").is_dir()
+    )
+    classpath = tuple(
+        path.parent / "target/classes"
+        for path in sorted(selected - {boot_pom}, key=str)
+        if metadata[path][1] != "pom" and (path.parent / "src/main").is_dir()
+    )
+    return (
+        tuple(path.relative_to(source) for path in source_roots),
+        tuple(path.relative_to(source) for path in classpath),
+    )
+
+
 def discover(source_value: str, runtime: str = "auto") -> Detection:
     source = normalize_source(source_value)
     compose_files = _find(source, set(COMPOSE_NAMES), max_depth=2)
@@ -162,10 +308,7 @@ def discover(source_value: str, runtime: str = "auto") -> Detection:
             package, package_details = candidate, details
             break
     pom = poms[0] if poms else None
-    for candidate in poms:
-        if "spring-boot" in candidate.read_text(encoding="utf-8", errors="ignore"):
-            pom = candidate
-            break
+    boot_pom = _spring_boot_module(poms)
     pyproject = pyprojects[0] if pyprojects else None
     for candidate in pyprojects:
         if "fastapi" in candidate.read_text(encoding="utf-8", errors="ignore").lower():
@@ -175,10 +318,17 @@ def discover(source_value: str, runtime: str = "auto") -> Detection:
     package_manager = None
     if package_details:
         framework, package_manager = package_details
-    spring_boot = False
-    if pom:
-        content = pom.read_text(encoding="utf-8", errors="ignore")
-        spring_boot = "spring-boot" in content
+    frontend_port = _frontend_port(package, framework) if package else None
+    spring_boot = boot_pom is not None
+    spring_boot_port = 8080
+    spring_boot_profile = None
+    spring_boot_version = None
+    maven_watch: tuple[Path, ...] = ()
+    classpath_modules: tuple[Path, ...] = ()
+    if pom and boot_pom:
+        spring_boot_port, spring_boot_profile = _spring_boot_properties(boot_pom)
+        spring_boot_version = _spring_boot_version(poms)
+        maven_watch, classpath_modules = _maven_dependency_paths(poms, boot_pom, source)
     fastapi = False
     if pyproject:
         content = pyproject.read_text(encoding="utf-8", errors="ignore")
@@ -198,8 +348,15 @@ def discover(source_value: str, runtime: str = "auto") -> Detection:
         package_file=package,
         framework=framework,
         package_manager=package_manager,
+        frontend_port=frontend_port,
         pom_file=pom,
+        spring_boot_pom=boot_pom,
         spring_boot=spring_boot,
+        spring_boot_port=spring_boot_port,
+        spring_boot_profile=spring_boot_profile,
+        spring_boot_version=spring_boot_version,
+        maven_watch=maven_watch,
+        classpath_modules=classpath_modules,
         pyproject_file=pyproject,
         fastapi=fastapi,
     )
@@ -210,7 +367,9 @@ def _relative_directory(path: Path, source: Path) -> str:
     return relative or "."
 
 
-def _node_commands(manager: str, framework: str | None) -> tuple[str, str, int]:
+def _node_commands(
+    manager: str, framework: str | None, configured_port: int | None = None
+) -> tuple[str, str, int]:
     if manager == "pnpm":
         executable, install = "corepack pnpm", "corepack pnpm install --frozen-lockfile"
     elif manager == "yarn":
@@ -220,12 +379,13 @@ def _node_commands(manager: str, framework: str | None) -> tuple[str, str, int]:
     else:
         executable, install = "npm", "npm ci"
     if framework == "next":
-        return install, f"{executable} run dev -- --hostname 0.0.0.0 --port 3000", 3000
+        port = configured_port or 3000
+        return install, f"{executable} run dev -- --hostname 0.0.0.0 --port {port}", port
     if framework == "vite":
-        return install, f"{executable} run dev -- --host 0.0.0.0", 5173
+        return install, f"{executable} run dev -- --host 0.0.0.0", configured_port or 5173
     if framework == "react-scripts":
-        return install, f"{executable} run start", 3000
-    return install, f"{executable} run dev", 3000
+        return install, f"{executable} run start", configured_port or 3000
+    return install, f"{executable} run dev", configured_port or 3000
 
 
 def build_project_config(detection: Detection, name: str, run_user: str) -> dict[str, Any]:
@@ -267,7 +427,11 @@ def build_project_config(detection: Detection, name: str, run_user: str) -> dict
             raw["checks"]["paths"] = [str(detection.compose_file)]
         return raw
     if detection.package_file and detection.package_manager:
-        prepare, start, port = _node_commands(detection.package_manager, detection.framework)
+        prepare, start, port = _node_commands(
+            detection.package_manager,
+            detection.framework,
+            detection.frontend_port,
+        )
         frontend: dict[str, Any] = {
             "enabled": True,
             "workdir": _relative_directory(detection.package_file, detection.source),
@@ -294,27 +458,67 @@ def build_project_config(detection: Detection, name: str, run_user: str) -> dict
         raw["toolchain"].update({"java": True, "maven": True})
         commands.append("java")
         raw["java"] = {"maven": {"executable": "auto", "repository": "user"}}
-        if detection.spring_boot:
+        if detection.spring_boot and detection.spring_boot_pom:
+            boot_directory = detection.spring_boot_pom.parent.relative_to(
+                detection.pom_file.parent
+            ).as_posix()
+            selector = f"-pl {shlex.quote(boot_directory)} " if boot_directory != "." else ""
+            profile = (
+                f" -Dspring-boot.run.profiles={detection.spring_boot_profile}"
+                if detection.spring_boot_profile
+                else ""
+            )
+            extra_classpath = (
+                ' -Dspring-boot.run.additional-classpath-elements="$WSL_DEV_EXTRA_CLASSPATH"'
+                if detection.spring_boot_version
+                else ""
+            )
             raw["backend"] = {
                 "enabled": True,
                 "workdir": maven_workdir,
-                "port": 8080,
-                "prepare": '"$WSL_DEVCTL_MAVEN" -B -ntp -DskipTests clean install',
-                "run": '"$WSL_DEVCTL_MAVEN" -B -ntp spring-boot:run',
+                "port": detection.spring_boot_port,
+                "prepare": (
+                    f'"$WSL_DEVCTL_MAVEN" -B -ntp {selector}-am '
+                    "-DskipTests clean install"
+                ),
+                "run": (
+                    f'"$WSL_DEVCTL_MAVEN" -B -ntp {selector}spring-boot:run'
+                    f"{profile}{extra_classpath}"
+                ),
             }
             raw["compile"] = {
                 "enabled": True,
                 "workdir": maven_workdir,
-                "command": '"$WSL_DEVCTL_MAVEN" -B -ntp -DskipTests compile',
-                "resource_command": '"$WSL_DEVCTL_MAVEN" -B -ntp -DskipTests install',
-                "structural_command": '"$WSL_DEVCTL_MAVEN" -B -ntp -DskipTests clean install',
-                "watch": [f"{maven_workdir}/src/main" if maven_workdir != "." else "src/main"],
+                "command": (
+                    f'"$WSL_DEVCTL_MAVEN" -B -ntp {selector}-am -DskipTests compile'
+                ),
+                "resource_command": (
+                    f'"$WSL_DEVCTL_MAVEN" -B -ntp {selector}-am -DskipTests install'
+                ),
+                "structural_command": (
+                    f'"$WSL_DEVCTL_MAVEN" -B -ntp {selector}-am '
+                    "-DskipTests clean install"
+                ),
+                "watch": [path.as_posix() for path in detection.maven_watch],
                 "extensions": [".java", ".xml", ".yaml", ".yml", ".properties"],
                 "resource_extensions": [".xml", ".yaml", ".yml", ".properties"],
                 "structural": ["pom.xml", "**/pom.xml", ".mvn/**", "mvnw", "mvnw.cmd"],
             }
+            if detection.spring_boot_version:
+                raw["java"]["spring"] = {
+                    "devtools": (
+                        "org.springframework.boot:spring-boot-devtools:"
+                        f"{detection.spring_boot_version}"
+                    ),
+                    "classpath_modules": [
+                        path.as_posix() for path in detection.classpath_modules
+                    ],
+                    "classpath_entries": ["com"],
+                }
             raw["branch_switch"]["backend_command"] = raw["backend"]["prepare"]
-            raw["checks"].setdefault("tcp", []).append("127.0.0.1:8080")
+            raw["checks"].setdefault("tcp", []).append(
+                f"127.0.0.1:{detection.spring_boot_port}"
+            )
     if detection.pyproject_file and detection.fastapi and not raw["backend"]["enabled"]:
         python_workdir = _relative_directory(detection.pyproject_file, detection.source)
         use_uv = (detection.pyproject_file.parent / "uv.lock").exists()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 - Unreleased
+
+- Added safe `update`, `rename`, and `unregister` commands for the complete project lifecycle.
+- Made forced re-registration preserve and restart the project's previous runtime state.
+- Kept build caches in place during project renames and made cache deletion explicit.
+- Changed automatically generated registration names to the `local-*` convention while keeping
+  the reusable configuration templates named `dev-*.toml`.
+- Improved multi-module Spring Boot and Vite discovery for runnable modules, configured ports,
+  dependency classpaths, and real source watch roots.
+
 ## 0.2.0 - Unreleased
 
 - Added `init` discovery and deterministic TOML generation for Windows and WSL project paths.
