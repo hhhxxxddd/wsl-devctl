@@ -1,0 +1,45 @@
+name = "dev-next"
+run_user = "dev"
+source = "/mnt/c/Users/dev/source/dev-next"
+
+[runtime]
+driver = "host"
+
+[sync]
+enabled = true
+interval_ms = 750
+exclude = [
+  "/.git/",
+  "/.codegraph/",
+  "**/node_modules/",
+  "**/.next/",
+  "**/.turbo/",
+  "**/out/"
+]
+
+[backend]
+enabled = false
+
+[frontend]
+enabled = true
+workdir = "."
+port = 3000
+prepare = "corepack pnpm install --frozen-lockfile"
+run = "corepack pnpm run dev -- --hostname 0.0.0.0 --port 3000"
+
+[compile]
+enabled = false
+
+[branch_switch]
+enabled = true
+settle_ms = 1500
+timeout_seconds = 60
+frontend_command = "corepack pnpm install --frozen-lockfile"
+
+[toolchain]
+node = true
+package_manager = "pnpm"
+
+[checks]
+commands = ["git", "node", "corepack"]
+tcp = ["127.0.0.1:3000"]

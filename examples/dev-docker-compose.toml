@@ -1,0 +1,49 @@
+name = "dev-docker-compose"
+run_user = "dev"
+source = "/mnt/c/Users/dev/source/dev-docker-compose"
+
+[runtime]
+driver = "compose"
+
+[sync]
+enabled = true
+interval_ms = 750
+exclude = [
+  "/.git/",
+  "/.codegraph/",
+  "**/node_modules/",
+  "**/.next/",
+  "**/.turbo/",
+  "**/target/",
+  "**/__pycache__/"
+]
+
+[backend]
+enabled = false
+
+[frontend]
+enabled = false
+
+[compile]
+enabled = false
+
+[branch_switch]
+enabled = true
+settle_ms = 1500
+timeout_seconds = 60
+
+[docker.compose]
+workdir = "."
+files = ["compose.yaml"]
+profiles = ["dev"]
+build = true
+build_on_start = false
+pull = false
+remove_orphans = true
+stop_timeout_seconds = 20
+
+[toolchain]
+docker = true
+
+[checks]
+commands = ["git", "docker"]

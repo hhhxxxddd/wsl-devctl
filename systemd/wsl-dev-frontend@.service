@@ -1,0 +1,14 @@
+[Unit]
+Description=WSL development frontend for %i
+After=network-online.target wsl-dev-sync@%i.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wsl-devctl _worker %i frontend
+Restart=always
+RestartSec=2
+KillMode=control-group
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

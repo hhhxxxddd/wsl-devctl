@@ -1,0 +1,15 @@
+[Unit]
+Description=WSL development Docker Compose runtime for %i
+After=network-online.target docker.service wsl-dev-sync@%i.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wsl-devctl _worker %i compose
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

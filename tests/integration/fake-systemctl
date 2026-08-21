@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case ${1:-} in
+  daemon-reload|list-units)
+    exit 0
+    ;;
+esac
+echo "unexpected systemctl invocation in installer smoke test: $*" >&2
+exit 1

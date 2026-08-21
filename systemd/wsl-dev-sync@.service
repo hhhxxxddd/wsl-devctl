@@ -1,0 +1,14 @@
+[Unit]
+Description=WSL development source sync for %i
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wsl-devctl _worker %i sync
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

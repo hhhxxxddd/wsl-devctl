@@ -1,0 +1,41 @@
+name = "dev-generic"
+run_user = "dev"
+source = "/mnt/c/Users/dev/source/dev-generic"
+
+[sync]
+enabled = true
+interval_ms = 750
+exclude = [
+  "/.git/",
+  "/.codegraph/",
+  "**/node_modules/",
+  "**/target/",
+  "**/__pycache__/",
+  "**/dist/"
+]
+
+[backend]
+enabled = true
+workdir = "backend"
+port = 8000
+prepare = "./scripts/prepare-backend"
+run = "./scripts/run-backend"
+
+[frontend]
+enabled = true
+workdir = "frontend"
+port = 5173
+prepare = "corepack pnpm install --frozen-lockfile"
+run = "corepack pnpm dev -- --host 0.0.0.0"
+
+[compile]
+enabled = false
+
+[branch_switch]
+enabled = true
+settle_ms = 1500
+timeout_seconds = 60
+
+[checks]
+commands = ["git"]
+http = ["http://127.0.0.1:8000/health", "http://127.0.0.1:5173/"]

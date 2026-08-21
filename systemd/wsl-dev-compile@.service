@@ -1,0 +1,14 @@
+[Unit]
+Description=WSL development compiler watcher for %i
+After=wsl-dev-sync@%i.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wsl-devctl _worker %i compile
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

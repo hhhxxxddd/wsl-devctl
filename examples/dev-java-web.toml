@@ -1,0 +1,69 @@
+name = "dev-java-web"
+run_user = "dev"
+source = "/mnt/c/Users/dev/source/dev-java-web"
+
+[sync]
+enabled = true
+interval_ms = 750
+exclude = [
+  "/.git/",
+  "/.codegraph/",
+  "**/node_modules/",
+  "**/target/",
+  "**/.flattened-pom.xml",
+  "**/dist/"
+]
+
+[backend]
+enabled = true
+workdir = "backend"
+port = 8080
+prepare = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am -DskipTests clean install'
+run = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am spring-boot:run -Dspring-boot.run.profiles=local -Dspring-boot.run.additional-classpath-elements="$WSL_DEV_EXTRA_CLASSPATH"'
+
+[frontend]
+enabled = true
+workdir = "frontend"
+port = 5173
+prepare = "corepack pnpm install --frozen-lockfile"
+run = "corepack pnpm dev -- --host 0.0.0.0"
+
+[compile]
+enabled = true
+workdir = "backend"
+command = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am -DskipTests compile'
+resource_command = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am -DskipTests install'
+structural_command = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am -DskipTests clean install'
+watch = [
+  "backend/app-server/src/main",
+  "backend/app-domain/src/main"
+]
+extensions = [".java", ".xml", ".yaml", ".yml", ".properties"]
+resource_extensions = [".xml", ".yaml", ".yml", ".properties"]
+structural = ["pom.xml", "**/pom.xml", ".mvn/**", "mvnw", "mvnw.cmd"]
+exclude = [".flattened-pom.xml"]
+poll_ms = 500
+debounce_ms = 1000
+recovery_retry_seconds = 30
+
+[java.maven]
+executable = "auto"
+repository = "user" # user | project | path
+
+[java.spring]
+devtools = "org.springframework.boot:spring-boot-devtools:4.1.0"
+classpath_modules = [
+  "backend/app-domain/target/classes"
+]
+classpath_entries = ["com"]
+
+[branch_switch]
+enabled = true
+settle_ms = 1500
+timeout_seconds = 60
+backend_command = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am -DskipTests clean install'
+frontend_command = "corepack pnpm install --frozen-lockfile"
+
+[checks]
+commands = ["git"]
+http = ["http://127.0.0.1:8080/actuator/health", "http://127.0.0.1:5173/"]

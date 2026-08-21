@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  exit 2
+fi
+arguments=("$@")
+source_path=${arguments[$(($# - 2))]}
+destination_path=${arguments[$(($# - 1))]}
+mkdir -p -- "${destination_path}"
+cp -a -- "${source_path}/." "${destination_path}/"

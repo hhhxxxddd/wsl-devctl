@@ -1,0 +1,44 @@
+name = "dev-python-web"
+run_user = "dev"
+source = "/mnt/c/Users/dev/source/dev-python-web"
+
+[sync]
+enabled = true
+interval_ms = 750
+exclude = [
+  "/.git/",
+  "/.codegraph/",
+  "**/node_modules/",
+  "**/.venv/",
+  "**/__pycache__/",
+  "**/.pytest_cache/",
+  "**/dist/"
+]
+
+[backend]
+enabled = true
+workdir = "backend"
+port = 8000
+prepare = "uv sync --frozen"
+run = "uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app"
+
+[frontend]
+enabled = true
+workdir = "frontend"
+port = 5173
+prepare = "corepack pnpm install --frozen-lockfile"
+run = "corepack pnpm dev -- --host 0.0.0.0"
+
+[compile]
+enabled = false
+
+[branch_switch]
+enabled = true
+settle_ms = 1500
+timeout_seconds = 60
+backend_command = "uv sync --frozen"
+frontend_command = "corepack pnpm install --frozen-lockfile"
+
+[checks]
+commands = ["uv", "git"]
+http = ["http://127.0.0.1:8000/health", "http://127.0.0.1:5173/"]
