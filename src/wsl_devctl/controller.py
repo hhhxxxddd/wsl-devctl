@@ -8,7 +8,7 @@ from .drivers.spring import classpath_overlay, java_environment, signal_reload
 from .errors import DevctlError
 from .gitstate import GitState
 from .paths import RuntimePaths
-from .process import exec_shell_as_user, log, shell_as_user, systemctl
+from .process import log, systemctl
 from .state import (
     branch_failure_path,
     read_json,
@@ -18,8 +18,8 @@ from .state import (
     write_json,
 )
 from .sync import sync_once
+from .toolchain import exec_project_shell, install_mise_tools, shell_project, uses_mise
 from .watcher import ChangeKind
-
 
 UNIT_KINDS = ("sync", "compile", "backend", "frontend", "compose")
 
@@ -41,8 +41,8 @@ def runtime_environment(project: ProjectConfig, kind: str) -> dict[str, str]:
 def run_prepare(paths: RuntimePaths, project: ProjectConfig, kind: str) -> None:
     command = str(project.section(kind).get("prepare", "")).strip()
     if command:
-        shell_as_user(
-            project.run_user,
+        shell_project(
+            project,
             command,
             cwd=project.workdir(kind),
             env=runtime_environment(project, kind),
@@ -52,6 +52,8 @@ def run_prepare(paths: RuntimePaths, project: ProjectConfig, kind: str) -> None:
 
 
 def prepare_all(paths: RuntimePaths, project: ProjectConfig) -> None:
+    if uses_mise(project):
+        install_mise_tools(project)
     if project.runtime_driver == "compose":
         compose_prepare(project)
         return
@@ -82,8 +84,8 @@ def compile_once(
         except BlockingIOError:
             log("compile already running; change is coalesced")
             return 0
-        result = shell_as_user(
-            project.run_user,
+        result = shell_project(
+            project,
             selected,
             cwd=project.workdir("compile"),
             env=runtime_environment(project, "backend"),
@@ -117,8 +119,8 @@ def quiesced_build(
         if backend_was_active:
             log(f"stopping backend before {reason} build")
             systemctl("stop", unit(project.name, "backend"), check=False)
-        result = shell_as_user(
-            project.run_user,
+        result = shell_project(
+            project,
             command,
             cwd=project.workdir("compile"),
             env=runtime_environment(project, "backend"),
@@ -186,8 +188,8 @@ def run_worker_process(paths: RuntimePaths, project: ProjectConfig, kind: str) -
         environment["WSL_DEV_EXTRA_CLASSPATH"] = classpath_overlay(paths, project)
     else:
         environment = runtime_environment(project, kind)
-    exec_shell_as_user(
-        project.run_user,
+    exec_project_shell(
+        project,
         command,
         cwd=project.workdir(kind),
         env=environment,
@@ -230,8 +232,8 @@ def rebuild_after_branch_switch(
                     continue
                 command = str(branch.get(f"{kind}_command", "")).strip()
                 if command:
-                    shell_as_user(
-                        project.run_user,
+                    shell_project(
+                        project,
                         command,
                         cwd=project.workdir(kind),
                         env=runtime_environment(project, kind),

@@ -39,6 +39,16 @@ class DiscoveryTests(unittest.TestCase):
             project = parse_project(parsed)
             self.assertEqual(project.runtime_driver, "host")
 
+            mise_raw = build_project_config(
+                detection,
+                default_name(source),
+                getpass.getuser(),
+                "mise",
+            )
+            self.assertEqual(mise_raw["toolchain"]["provider"], "mise")
+            self.assertIn("pnpm install", mise_raw["frontend"]["prepare"])
+            self.assertNotIn("corepack", mise_raw["frontend"]["prepare"])
+
     def test_vite_project_uses_vite_host_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "web"

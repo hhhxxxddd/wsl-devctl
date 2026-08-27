@@ -1,5 +1,5 @@
 name = "dev-docker-compose"
-run_user = "dev"
+run_user = "root"
 source = "/mnt/c/Users/dev/source/dev-docker-compose"
 
 [runtime]
@@ -43,6 +43,7 @@ remove_orphans = true
 stop_timeout_seconds = 20
 
 [toolchain]
+provider = "system"
 docker = true
 
 [checks]

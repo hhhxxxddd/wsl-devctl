@@ -13,7 +13,6 @@ from .config import validate_name
 from .errors import DevctlError
 from .process import run
 
-
 COMPOSE_NAMES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 IGNORED_DIRECTORIES = frozenset(
     {".git", ".next", ".turbo", "node_modules", "target", "dist", "build", ".venv"}
@@ -371,9 +370,9 @@ def _node_commands(
     manager: str, framework: str | None, configured_port: int | None = None
 ) -> tuple[str, str, int]:
     if manager == "pnpm":
-        executable, install = "corepack pnpm", "corepack pnpm install --frozen-lockfile"
+        executable, install = "pnpm", "pnpm install --frozen-lockfile"
     elif manager == "yarn":
-        executable, install = "corepack yarn", "corepack yarn install --immutable"
+        executable, install = "yarn", "yarn install --immutable"
     elif manager == "bun":
         executable, install = "bun", "bun install --frozen-lockfile"
     else:
@@ -388,7 +387,12 @@ def _node_commands(
     return install, f"{executable} run dev", configured_port or 3000
 
 
-def build_project_config(detection: Detection, name: str, run_user: str) -> dict[str, Any]:
+def build_project_config(
+    detection: Detection,
+    name: str,
+    run_user: str,
+    toolchain_provider: str = "system",
+) -> dict[str, Any]:
     validate_name(name)
     excludes = list(BASE_EXCLUDES)
     if detection.package_file:
@@ -404,7 +408,7 @@ def build_project_config(detection: Detection, name: str, run_user: str) -> dict
         "compile": {"enabled": False, "workdir": "."},
         "branch_switch": {"enabled": True, "settle_ms": 1500, "timeout_seconds": 60},
         "checks": {"commands": ["git"]},
-        "toolchain": {},
+        "toolchain": {"provider": toolchain_provider},
         "docker": {},
     }
     commands = raw["checks"]["commands"]
@@ -421,7 +425,7 @@ def build_project_config(detection: Detection, name: str, run_user: str) -> dict
                 "stop_timeout_seconds": 20,
             }
         }
-        raw["toolchain"] = {"docker": True}
+        raw["toolchain"] = {"provider": toolchain_provider, "docker": True}
         commands.append("docker")
         if compose_root != detection.source:
             raw["checks"]["paths"] = [str(detection.compose_file)]
@@ -446,12 +450,7 @@ def build_project_config(detection: Detection, name: str, run_user: str) -> dict
         raw["toolchain"].update(
             {"node": True, "package_manager": detection.package_manager}
         )
-        package_command = (
-            "corepack"
-            if detection.package_manager in {"pnpm", "yarn"}
-            else detection.package_manager
-        )
-        commands.extend(["node", package_command])
+        commands.extend(["node", detection.package_manager])
         raw["checks"]["tcp"] = [f"127.0.0.1:{port}"]
     if detection.pom_file:
         maven_workdir = _relative_directory(detection.pom_file, detection.source)

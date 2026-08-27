@@ -8,9 +8,9 @@ from pathlib import Path
 from ..config import ProjectConfig, require_within
 from ..errors import DevctlError
 from ..paths import RuntimePaths
-from ..process import run, run_as_user
+from ..process import run
+from ..toolchain import run_project
 from .maven import MavenRuntime, resolve_maven
-
 
 COORDINATE_PART_RE = re.compile(r"^[A-Za-z0-9_.+\-]+$")
 
@@ -57,8 +57,8 @@ def ensure_devtools(project: ProjectConfig) -> Path | None:
     jar = artifact_jar(maven.repository, coordinate)
     if jar.is_file():
         return jar
-    result = run_as_user(
-        project.run_user,
+    result = run_project(
+        project,
         [maven.executable, "-q", f"-Dartifact={coordinate}", "dependency:get"],
         cwd=project.workdir("backend"),
         env=maven.environment(),

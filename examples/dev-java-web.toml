@@ -1,5 +1,5 @@
 name = "dev-java-web"
-run_user = "dev"
+run_user = "root"
 source = "/mnt/c/Users/dev/source/dev-java-web"
 
 [sync]
@@ -25,8 +25,8 @@ run = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am spring-boot:run -Dspring-b
 enabled = true
 workdir = "frontend"
 port = 5173
-prepare = "corepack pnpm install --frozen-lockfile"
-run = "corepack pnpm dev -- --host 0.0.0.0"
+prepare = "pnpm install --frozen-lockfile"
+run = "pnpm dev -- --host 0.0.0.0"
 
 [compile]
 enabled = true
@@ -62,8 +62,15 @@ enabled = true
 settle_ms = 1500
 timeout_seconds = 60
 backend_command = '"$WSL_DEVCTL_MAVEN" -B -ntp -pl app-server -am -DskipTests clean install'
-frontend_command = "corepack pnpm install --frozen-lockfile"
+frontend_command = "pnpm install --frozen-lockfile"
+
+[toolchain]
+provider = "mise"
+java = true
+maven = true
+node = true
+package_manager = "pnpm"
 
 [checks]
-commands = ["git"]
+commands = ["git", "java", "pnpm"]
 http = ["http://127.0.0.1:8080/actuator/health", "http://127.0.0.1:5173/"]

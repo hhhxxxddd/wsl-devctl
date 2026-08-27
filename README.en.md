@@ -91,6 +91,7 @@ deployment platform or an all-language toolchain/version manager.
 - Ubuntu WSL with systemd enabled.
 - Python 3.11 or newer.
 - A Windows project accessible from WSL through `/mnt/c`, `/mnt/d`, or another mounted drive.
+- mise is recommended; the system toolchain provider remains available without it.
 
 ### 2. Install
 
@@ -134,6 +135,7 @@ Windows and WSL paths are both accepted:
 
 ```bash
 wsl-devctl init 'C:\Users\you\source\my-app' --dry-run
+wsl-devctl init 'C:\Users\you\source\my-app' --dry-run --json
 ```
 
 This prints the detected stack and generated TOML without changing the system.
@@ -153,18 +155,20 @@ The command will:
 5. Prepare project dependencies and build artifacts.
 6. Start sync, compile, and development-server workers.
 
-The default name is `dev-<directory-name>`. Override it when necessary:
+The default name is `local-<directory-name>`. Override it when necessary:
 
 ```bash
 sudo wsl-devctl init 'C:\Users\you\source\my-app' \
   --name local-my-app \
   --user "$USER" \
   --runtime auto \
+  --toolchain mise \
   --fix \
   --start
 ```
 
-`--runtime` accepts `auto`, `host`, or `compose`.
+`--runtime` accepts `auto`, `host`, or `compose`. `--toolchain` accepts `auto`, `mise`, or
+`system`; auto prefers mise when it is available.
 
 ## Everyday use
 
@@ -176,6 +180,15 @@ wsl-devctl show local-my-app
 wsl-devctl status local-my-app
 wsl-devctl logs -n 200 local-my-app
 wsl-devctl logs -f local-my-app
+```
+
+Machine-readable output is available for scripts and AI tools:
+
+```bash
+wsl-devctl list --json
+wsl-devctl show local-my-app --json
+wsl-devctl status local-my-app --json
+wsl-devctl doctor local-my-app --json
 ```
 
 Start, stop, and restart:
@@ -330,6 +343,35 @@ sudo wsl-devctl doctor local-my-app --fix
 Project declarations take priority: Maven Wrapper beats system Maven, `packageManager` and lockfiles
 select the Node package manager, and `uv.lock` selects uv.
 
+The `[toolchain]` table selects one of two execution providers:
+
+```toml
+[toolchain]
+provider = "mise"
+java = true
+maven = true
+node = true
+package_manager = "pnpm"
+```
+
+- `mise` runs project commands through `mise exec`. Versions come from `mise.toml`, `.mise.toml`,
+  or mise's standard global configuration; `wsl-devctl` does not guess project versions.
+- `system` runs commands directly from the WSL `PATH` for legacy projects and system tools.
+
+Reproducible project versions should be committed to the project repository, for example:
+
+```toml
+[tools]
+java = "temurin-21"
+maven = "3.9"
+node = "22"
+pnpm = "10"
+```
+
+`doctor` reports missing declarations and uninstalled versions. Only `doctor --fix`, `prepare`, and
+`start --prepare` explicitly run `mise install`; ordinary startup, restart, and live reload never
+install, upgrade, or switch versions. Maven Wrapper still takes precedence over mise or system Maven.
+
 Bun and uv are not downloaded through remote shell scripts. Docker Desktop WSL Integration must
 also be enabled manually in Docker Desktop.
 
@@ -365,8 +407,8 @@ partially updated dependency graph. Fix the cause and repeat `start --prepare`.
 - The Windows workspace is the only source of truth; do not edit the WSL mirror directly.
 - Source, cache root, and cache are validated before bounded `rsync --delete` operations.
 - A cache cannot be `/` or escape its declared root through `..` or symlinks.
-- Project commands run as `run_user`; root is reserved for systemd coordination and controller
-  state.
+- Project commands run as `run_user`. A personal single-user WSL can use root directly; shared
+  environments can configure an unprivileged user.
 - Normal startup never installs software silently.
 
 See [Architecture](docs/architecture.md) for the design boundaries.

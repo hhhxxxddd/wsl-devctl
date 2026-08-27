@@ -11,11 +11,11 @@ from typing import Any
 from .errors import DevctlError
 from .paths import RuntimePaths
 
-
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 VALID_REPOSITORY_MODES = frozenset({"user", "project", "path"})
 VALID_RUNTIME_DRIVERS = frozenset({"host", "compose"})
+VALID_TOOLCHAIN_PROVIDERS = frozenset({"system", "mise"})
 
 
 def validate_name(name: str) -> None:
@@ -78,6 +78,10 @@ class ProjectConfig:
     @property
     def runtime_driver(self) -> str:
         return str(self.section("runtime").get("driver", "host"))
+
+    @property
+    def toolchain_provider(self) -> str:
+        return str(self.section("toolchain").get("provider", "system"))
 
     def compose(self) -> dict[str, Any]:
         docker = self.section("docker")
@@ -193,6 +197,21 @@ def _validate_compose(project: ProjectConfig) -> None:
         raise DevctlError("docker.compose.stop_timeout_seconds must be between 1 and 600")
 
 
+def _validate_toolchain(project: ProjectConfig) -> None:
+    toolchain = project.section("toolchain")
+    provider = str(toolchain.get("provider", "system"))
+    if provider not in VALID_TOOLCHAIN_PROVIDERS:
+        raise DevctlError(
+            f"toolchain.provider must be one of {sorted(VALID_TOOLCHAIN_PROVIDERS)}"
+        )
+    for name in ("java", "maven", "node", "python", "uv", "docker"):
+        if name in toolchain and not isinstance(toolchain[name], bool):
+            raise DevctlError(f"toolchain.{name} must be a boolean")
+    manager = toolchain.get("package_manager", "")
+    if manager is not None and not isinstance(manager, str):
+        raise DevctlError("toolchain.package_manager must be a string")
+
+
 def parse_project(raw: dict[str, Any]) -> ProjectConfig:
     name = str(raw.get("name", ""))
     validate_name(name)
@@ -243,6 +262,7 @@ def parse_project(raw: dict[str, Any]) -> ProjectConfig:
     project.workdir("compile")
     _validate_java(raw, project)
     _validate_compose(project)
+    _validate_toolchain(project)
     return project
 
 

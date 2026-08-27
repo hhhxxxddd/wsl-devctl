@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -175,13 +176,27 @@ def cmd_init(args: argparse.Namespace) -> None:
     run_user = args.user or os.environ.get("SUDO_USER") or os.environ.get("USER") or ""
     if not run_user:
         raise DevctlError("cannot determine the project user; pass --user")
-    raw = build_project_config(detection, name, run_user)
+    toolchain_provider = args.toolchain
+    if toolchain_provider == "auto":
+        toolchain_provider = "mise" if shutil.which("mise") else "system"
+    raw = build_project_config(detection, name, run_user, toolchain_provider)
     content = render_toml(raw)
     project = parse_project(raw)
     if args.dry_run:
+        if args.json:
+            print(
+                json.dumps(
+                    {"detected": detection.labels(), "config": raw},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return
         print(f"Detected: {', '.join(detection.labels())}", file=sys.stderr)
         print(content, end="")
         return
+    if args.json:
+        raise DevctlError("init --json currently requires --dry-run")
     require_root("init")
     runtime = paths()
     destination = runtime.config_path(project.name)
@@ -349,15 +364,41 @@ def cmd_unregister(args: argparse.Namespace) -> None:
     log(f"unregistered {project.name}; {suffix}")
 
 
-def cmd_list(_args: argparse.Namespace) -> None:
+def cmd_list(args: argparse.Namespace) -> None:
     runtime = paths()
+    values: list[dict[str, object]] = []
     for path in sorted(runtime.config_dir.glob("*.toml")):
         try:
             project = load_project(path.stem, runtime)
             states = [kind for kind in enabled_units(project) if unit_active(project.name, kind)]
-            print(f"{project.name}\t{','.join(states) if states else 'stopped'}")
+            values.append(
+                {
+                    "name": project.name,
+                    "state": states,
+                    "valid": True,
+                    "runtime": project.runtime_driver,
+                    "toolchain": project.toolchain_provider,
+                }
+            )
         except DevctlError as exc:
-            print(f"{path.stem}\tINVALID: {exc}")
+            values.append(
+                {
+                    "name": path.stem,
+                    "state": [],
+                    "valid": False,
+                    "error": str(exc),
+                }
+            )
+    if args.json:
+        print(json.dumps(values, ensure_ascii=False, indent=2))
+        return
+    for value in values:
+        if value["valid"]:
+            states = value["state"]
+            label = ",".join(states) if isinstance(states, list) and states else "stopped"
+            print(f"{value['name']}\t{label}")
+        else:
+            print(f"{value['name']}\tINVALID: {value['error']}")
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
@@ -430,43 +471,86 @@ def cmd_restart(args: argparse.Namespace) -> None:
     log(f"restarted runtime services for {project.name}")
 
 
+def _status_report(runtime: RuntimePaths, project: ProjectConfig) -> dict[str, object]:
+    kinds = enabled_units(project)
+    units = {kind: unit_active(project.name, kind) for kind in kinds}
+    recovery = read_json(resource_recovery_path(runtime, project.name))
+    services: dict[str, dict[str, object]] = {}
+    for kind in ("backend", "frontend"):
+        if not project.enabled(kind):
+            continue
+        active = units.get(kind, False)
+        port = int(project.section(kind).get("port", 0) or 0)
+        reachable = not port or tcp_probe("127.0.0.1", port)
+        services[kind] = {
+            "active": active,
+            "port": port or None,
+            "reachable": reachable,
+            "healthy": active and reachable,
+        }
+    compose: dict[str, object] | None = None
+    if project.runtime_driver == "compose":
+        active = units.get("compose", False)
+        healthy, detail = compose_healthy(project)
+        compose = {"active": active, "healthy": active and healthy, "detail": detail}
+    healthy = (
+        recovery is None
+        and all(units.values())
+        and all(bool(value["healthy"]) for value in services.values())
+        and (compose is None or bool(compose["healthy"]))
+    )
+    return {
+        "name": project.name,
+        "runtime": project.runtime_driver,
+        "toolchain": project.toolchain_provider,
+        "healthy": healthy,
+        "units": units,
+        "services": services,
+        "compose": compose,
+        "recovery": recovery,
+    }
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     runtime = paths()
     project = load_project(args.name, runtime)
+    report = _status_report(runtime, project)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        raise SystemExit(0 if report["healthy"] else 1)
     kinds = enabled_units(project)
+    status_units = [unit(project.name, kind) for kind in kinds]
     result = run(
-        ["systemctl", "--no-pager", "--full", "status", *[unit(project.name, kind) for kind in kinds]],
+        ["systemctl", "--no-pager", "--full", "status", *status_units],
         check=False,
     )
-    failures = 0
     print("\nRuntime health:")
-    recovery = read_json(resource_recovery_path(runtime, project.name))
-    if recovery is not None:
-        failures += 1
+    recovery = report["recovery"]
+    if isinstance(recovery, dict):
         print(
             "FAIL recovery: "
             f"status={recovery.get('status', 'unknown')}, "
             f"attempts={recovery.get('attempts', 0)}"
         )
-    for kind in ("backend", "frontend"):
-        if not project.enabled(kind):
-            continue
-        active = unit_active(project.name, kind)
-        port = int(project.section(kind).get("port", 0) or 0)
-        reachable = not port or tcp_probe("127.0.0.1", port)
-        healthy = active and reachable
-        detail = f"active={str(active).lower()}"
-        if port:
-            detail += f", 127.0.0.1:{port}={'reachable' if reachable else 'unreachable'}"
-        print(f"{'PASS' if healthy else 'FAIL'} {kind}: {detail}")
-        failures += int(not healthy)
-    if project.runtime_driver == "compose":
-        active = unit_active(project.name, "compose")
-        healthy, detail = compose_healthy(project)
-        ok = active and healthy
-        print(f"{'PASS' if ok else 'FAIL'} compose: active={str(active).lower()}, {detail}")
-        failures += int(not ok)
-    raise SystemExit(1 if failures else result.returncode)
+    services = report["services"]
+    if isinstance(services, dict):
+        for kind, value in services.items():
+            if not isinstance(value, dict):
+                continue
+            detail = f"active={str(value['active']).lower()}"
+            if value.get("port"):
+                detail += (
+                    f", 127.0.0.1:{value['port']}="
+                    f"{'reachable' if value['reachable'] else 'unreachable'}"
+                )
+            print(f"{'PASS' if value['healthy'] else 'FAIL'} {kind}: {detail}")
+    compose = report["compose"]
+    if isinstance(compose, dict):
+        print(
+            f"{'PASS' if compose['healthy'] else 'FAIL'} compose: "
+            f"active={str(compose['active']).lower()}, {compose['detail']}"
+        )
+    raise SystemExit(0 if report["healthy"] and result.returncode == 0 else 1)
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
@@ -483,7 +567,16 @@ def cmd_logs(args: argparse.Namespace) -> None:
 def cmd_show(args: argparse.Namespace) -> None:
     runtime = paths()
     project = load_project(args.name, runtime)
-    print(runtime.config_path(project.name).read_text(encoding="utf-8"), end="")
+    if args.json:
+        print(
+            json.dumps(
+                read_toml(runtime.config_path(project.name)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(runtime.config_path(project.name).read_text(encoding="utf-8"), end="")
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
@@ -491,7 +584,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     if args.fix:
         require_root("doctor --fix")
         apply_dependency_fixes(project)
-    raise SystemExit(doctor(project))
+    raise SystemExit(doctor(project, json_output=args.json))
 
 
 def cmd_worker(args: argparse.Namespace) -> None:
@@ -512,10 +605,16 @@ def parser() -> argparse.ArgumentParser:
     initialize.add_argument("--name")
     initialize.add_argument("--user")
     initialize.add_argument("--runtime", choices=("auto", "host", "compose"), default="auto")
+    initialize.add_argument(
+        "--toolchain",
+        choices=("auto", "system", "mise"),
+        default="auto",
+    )
     initialize.add_argument("--start", action="store_true")
     initialize.add_argument("--fix", action="store_true")
     initialize.add_argument("--force", action="store_true")
     initialize.add_argument("--dry-run", action="store_true")
+    initialize.add_argument("--json", action="store_true")
     initialize.set_defaults(func=cmd_init)
     register = sub.add_parser("register", help="validate and install a TOML project config")
     register.add_argument("config")
@@ -536,6 +635,7 @@ def parser() -> argparse.ArgumentParser:
     unregister.add_argument("--purge-cache", action="store_true")
     unregister.set_defaults(func=cmd_unregister)
     listing = sub.add_parser("list", help="list registered projects")
+    listing.add_argument("--json", action="store_true")
     listing.set_defaults(func=cmd_list)
     for name, func in (
         ("sync", cmd_sync),
@@ -548,6 +648,8 @@ def parser() -> argparse.ArgumentParser:
     ):
         command = sub.add_parser(name)
         command.add_argument("name")
+        if name in {"status", "show"}:
+            command.add_argument("--json", action="store_true")
         command.set_defaults(func=func)
     up = sub.add_parser("up")
     up.add_argument("name")
@@ -563,6 +665,7 @@ def parser() -> argparse.ArgumentParser:
     doctor_parser = sub.add_parser("doctor")
     doctor_parser.add_argument("name")
     doctor_parser.add_argument("--fix", action="store_true")
+    doctor_parser.add_argument("--json", action="store_true")
     doctor_parser.set_defaults(func=cmd_doctor)
     logs = sub.add_parser("logs")
     logs.add_argument("name")

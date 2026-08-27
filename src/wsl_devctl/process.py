@@ -5,8 +5,8 @@ import pwd
 import shlex
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from .errors import DevctlError
 
@@ -65,7 +65,9 @@ def _identity_command(user: str, command: Sequence[str], env: Mapping[str, str])
         return ["runuser", "-u", user, "--", "/usr/bin/env", *assignments, *command]
     current = pwd.getpwuid(os.geteuid()).pw_name
     if current != user:
-        raise DevctlError(f"run as root or configured project user {user}; current user is {current}")
+        raise DevctlError(
+            f"run as root or configured project user {user}; current user is {current}"
+        )
     return ["/usr/bin/env", *assignments, *command]
 
 
@@ -115,13 +117,26 @@ def exec_shell_as_user(
     cwd: Path,
     env: Mapping[str, str] | None = None,
 ) -> None:
-    project_env = user_environment(user, env)
-    argv = _identity_command(
+    exec_as_user(
         user,
         ["/bin/bash", "-lc", f"exec {command}"],
-        project_env,
+        cwd=cwd,
+        env=env,
+        label=command,
     )
-    log(f"starting [{user}] ({cwd}) {command}")
+
+
+def exec_as_user(
+    user: str,
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str] | None = None,
+    label: str | None = None,
+) -> None:
+    project_env = user_environment(user, env)
+    argv = _identity_command(user, command, project_env)
+    log(f"starting [{user}] ({cwd}) {label or shlex.join(command)}")
     os.chdir(cwd)
     os.execvp(argv[0], argv)
 

@@ -87,6 +87,7 @@ flowchart LR
 - Ubuntu WSL，并启用 systemd。
 - Python 3.11 或更高版本。
 - Windows 项目能从 WSL 的 `/mnt/c`、`/mnt/d` 等路径访问。
+- 推荐安装 mise；不使用 mise 时仍可选择系统工具链。
 
 ### 2. 安装
 
@@ -129,6 +130,7 @@ Windows 和 WSL 路径都可以使用：
 
 ```bash
 wsl-devctl init 'C:\Users\you\source\my-app' --dry-run
+wsl-devctl init 'C:\Users\you\source\my-app' --dry-run --json
 ```
 
 命令只输出自动识别结果和将要生成的 TOML，不修改系统。
@@ -148,18 +150,20 @@ sudo wsl-devctl init 'C:\Users\you\source\my-app' --fix --start
 5. 安装项目依赖并准备构建产物。
 6. 启动同步、编译和开发服务器。
 
-默认项目名为 `dev-<目录名>`。需要时可显式指定：
+默认项目名为 `local-<目录名>`。需要时可显式指定：
 
 ```bash
 sudo wsl-devctl init 'C:\Users\you\source\my-app' \
   --name local-my-app \
   --user "$USER" \
   --runtime auto \
+  --toolchain mise \
   --fix \
   --start
 ```
 
-`--runtime` 支持 `auto`、`host` 和 `compose`。
+`--runtime` 支持 `auto`、`host` 和 `compose`。`--toolchain` 支持 `auto`、`mise` 和
+`system`；自动模式检测到 mise 时优先使用 mise。
 
 ## 日常使用
 
@@ -171,6 +175,15 @@ wsl-devctl show local-my-app
 wsl-devctl status local-my-app
 wsl-devctl logs -n 200 local-my-app
 wsl-devctl logs -f local-my-app
+```
+
+给脚本或 AI 工具读取时可以使用结构化输出：
+
+```bash
+wsl-devctl list --json
+wsl-devctl show local-my-app --json
+wsl-devctl status local-my-app --json
+wsl-devctl doctor local-my-app --json
 ```
 
 启动、停止和重启：
@@ -318,6 +331,35 @@ sudo wsl-devctl doctor local-my-app --fix
 项目自身的声明优先：Maven Wrapper 优先于系统 Maven，`packageManager` 和 lockfile 决定
 Node 包管理器，`uv.lock` 决定是否使用 uv。
 
+`[toolchain]` 可以选择两种执行方式：
+
+```toml
+[toolchain]
+provider = "mise"
+java = true
+maven = true
+node = true
+package_manager = "pnpm"
+```
+
+- `mise`：项目命令通过 `mise exec` 运行。版本由源码目录中的 `mise.toml`、`.mise.toml`
+  或 mise 的标准全局配置声明；`wsl-devctl` 不猜测项目版本。
+- `system`：直接使用 WSL `PATH` 中的命令，兼容不由 mise 管理的旧项目和系统工具。
+
+推荐把可复现的项目版本提交到项目仓库，例如：
+
+```toml
+[tools]
+java = "temurin-21"
+maven = "3.9"
+node = "22"
+pnpm = "10"
+```
+
+`doctor` 会报告缺少声明或尚未安装的版本。只有 `doctor --fix`、`prepare` 和
+`start --prepare` 会执行明确的 `mise install`；普通 `start`、`restart` 和后台热更不会安装、
+升级或切换版本。Maven Wrapper 仍然优先于 mise 或系统 Maven。
+
 Bun 和 uv 不会通过远程 shell 脚本自动下载。Docker Desktop 的 WSL Integration 也需要在
 Docker Desktop 中手动启用。
 
@@ -353,7 +395,7 @@ wsl-devctl doctor local-my-app
 - Windows 工作区是唯一源码真源，不要直接编辑 WSL 镜像。
 - 使用 `rsync --delete` 前会验证 source、cache root 和 cache 互不重叠。
 - cache 不能指向 `/`，也不能通过 `..` 或符号链接逃出声明边界。
-- 项目命令以配置的 `run_user` 运行；root 只负责 systemd 协调和控制器状态。
+- 项目命令以配置的 `run_user` 运行。个人单用户 WSL 可直接使用 root；多人环境可配置普通用户。
 - 工具不会在普通启动过程中静默安装软件。
 
 更多设计说明见 [架构文档](docs/architecture.md)。

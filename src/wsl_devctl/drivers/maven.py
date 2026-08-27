@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..config import ProjectConfig, user_home
 from ..errors import DevctlError
-from ..process import run_as_user
+from ..toolchain import project_command_exists
 
 
 @dataclass(frozen=True)
@@ -88,16 +88,7 @@ def maven_executable_exists(runtime: MavenRuntime, project: ProjectConfig) -> bo
         except ValueError:
             return False
         return source_candidate.is_file()
-    environment = runtime.environment()
     cwd = project.workdir("backend")
     if not cwd.is_dir():
         cwd = project.cache
-    result = run_as_user(
-        project.run_user,
-        ["/bin/bash", "-lc", f"command -v {shlex.quote(runtime.executable)}"],
-        cwd=cwd,
-        env=environment,
-        check=False,
-        capture=True,
-    )
-    return result.returncode == 0
+    return project_command_exists(project, runtime.executable, cwd=cwd)

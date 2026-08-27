@@ -8,12 +8,20 @@ from .config import ProjectConfig
 from .drivers.maven import resolve_maven
 from .errors import DevctlError
 from .process import log, run, run_as_user
+from .toolchain import (
+    install_mise_tools,
+    mise_inventory,
+    missing_mise_tools,
+    required_tools,
+    uses_mise,
+)
 
 
 @dataclass(frozen=True)
 class DependencyPlan:
     apt_packages: tuple[str, ...]
     install_corepack: bool
+    mise_tools: tuple[str, ...]
     enable_docker: bool
     add_docker_group: bool
     unresolved: tuple[str, ...]
@@ -23,6 +31,7 @@ class DependencyPlan:
         return not (
             self.apt_packages
             or self.install_corepack
+            or self.mise_tools
             or self.enable_docker
             or self.add_docker_group
             or self.unresolved
@@ -52,26 +61,47 @@ def dependency_plan(project: ProjectConfig) -> DependencyPlan:
         packages.append("rsync")
     if shutil.which("ss") is None:
         packages.append("iproute2")
-    if shutil.which("runuser") is None:
+    if project.run_user != "root" and shutil.which("runuser") is None:
         packages.append("util-linux")
-    if bool(toolchain.get("java", False)) and shutil.which("java") is None:
-        packages.append("default-jdk")
     maven = resolve_maven(project)
-    if bool(toolchain.get("maven", False)) and maven and maven.executable == "mvn":
-        if shutil.which("mvn") is None:
-            packages.append("maven")
-    if bool(toolchain.get("node", False)) and shutil.which("node") is None:
-        packages.extend(["nodejs", "npm"])
     manager = str(toolchain.get("package_manager", ""))
-    needs_corepack = manager in {"pnpm", "yarn"} and shutil.which("corepack") is None
-    if manager == "bun" and shutil.which("bun") is None:
-        unresolved.append(
-            "Bun is required; automatic Bun installation is intentionally unsupported"
-        )
-    if bool(toolchain.get("python", False)) and shutil.which("python3") is None:
-        packages.extend(["python3", "python3-venv", "python3-pip"])
-    if bool(toolchain.get("uv", False)) and shutil.which("uv") is None:
-        unresolved.append("uv is required; install it from the official uv distribution")
+    mise_tools: tuple[str, ...] = ()
+    if uses_mise(project):
+        if shutil.which("mise") is None:
+            unresolved.append("mise is required by toolchain.provider=mise")
+        else:
+            inventory = mise_inventory(project)
+            required = set(required_tools(project))
+            if maven and "/" in maven.executable:
+                required.discard("maven")
+            undeclared = sorted(required - set(inventory))
+            if undeclared:
+                unresolved.append(
+                    "mise has no active version declaration for: " + ", ".join(undeclared)
+                )
+            mise_tools = missing_mise_tools(project, tuple(required))
+        needs_corepack = False
+    else:
+        if bool(toolchain.get("java", False)) and shutil.which("java") is None:
+            packages.append("default-jdk")
+        if (
+            bool(toolchain.get("maven", False))
+            and maven
+            and maven.executable == "mvn"
+            and shutil.which("mvn") is None
+        ):
+            packages.append("maven")
+        if bool(toolchain.get("node", False)) and shutil.which("node") is None:
+            packages.extend(["nodejs", "npm"])
+        needs_corepack = manager in {"pnpm", "yarn"} and shutil.which("corepack") is None
+        if manager == "bun" and shutil.which("bun") is None:
+            unresolved.append(
+                "Bun is required; automatic Bun installation is intentionally unsupported"
+            )
+        if bool(toolchain.get("python", False)) and shutil.which("python3") is None:
+            packages.extend(["python3", "python3-venv", "python3-pip"])
+        if bool(toolchain.get("uv", False)) and shutil.which("uv") is None:
+            unresolved.append("uv is required; install it from the official uv distribution")
     docker_requested = project.runtime_driver == "compose" or bool(toolchain.get("docker", False))
     docker_missing = docker_requested and shutil.which("docker") is None
     compose_missing = docker_requested and not docker_missing and not _compose_available(project)
@@ -90,7 +120,11 @@ def dependency_plan(project: ProjectConfig) -> DependencyPlan:
             capture=True,
         )
         detail = (info.stderr or "").lower()
-        add_group = info.returncode != 0 and "permission denied" in detail
+        add_group = (
+            project.run_user != "root"
+            and info.returncode != 0
+            and "permission denied" in detail
+        )
         if info.returncode != 0 and not add_group:
             service = run(
                 ["systemctl", "cat", "docker.service"],
@@ -107,8 +141,9 @@ def dependency_plan(project: ProjectConfig) -> DependencyPlan:
     return DependencyPlan(
         apt_packages=tuple(dict.fromkeys(packages)),
         install_corepack=needs_corepack,
+        mise_tools=mise_tools,
         enable_docker=start_docker,
-        add_docker_group=add_group or docker_missing,
+        add_docker_group=project.run_user != "root" and (add_group or docker_missing),
         unresolved=tuple(unresolved),
     )
 
@@ -119,6 +154,8 @@ def describe_plan(plan: DependencyPlan) -> list[str]:
         values.append("APT packages: " + ", ".join(plan.apt_packages))
     if plan.install_corepack:
         values.append("Node global tool: corepack")
+    if plan.mise_tools:
+        values.append("mise tools: " + ", ".join(plan.mise_tools))
     if plan.enable_docker:
         values.append("Docker Engine service will be enabled and started")
     if plan.add_docker_group:
@@ -146,6 +183,8 @@ def apply_dependency_fixes(project: ProjectConfig) -> DependencyPlan:
             raise DevctlError("npm is unavailable after dependency installation")
         run(["npm", "install", "--global", "corepack"])
         run(["corepack", "enable"])
+    if plan.mise_tools:
+        install_mise_tools(project, plan.mise_tools)
     if plan.enable_docker:
         run(["systemctl", "enable", "--now", "docker"])
     if plan.add_docker_group:

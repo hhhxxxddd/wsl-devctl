@@ -1,5 +1,5 @@
 name = "dev-generic"
-run_user = "dev"
+run_user = "root"
 source = "/mnt/c/Users/dev/source/dev-generic"
 
 [sync]
@@ -25,8 +25,8 @@ run = "./scripts/run-backend"
 enabled = true
 workdir = "frontend"
 port = 5173
-prepare = "corepack pnpm install --frozen-lockfile"
-run = "corepack pnpm dev -- --host 0.0.0.0"
+prepare = "pnpm install --frozen-lockfile"
+run = "pnpm dev -- --host 0.0.0.0"
 
 [compile]
 enabled = false
@@ -36,6 +36,11 @@ enabled = true
 settle_ms = 1500
 timeout_seconds = 60
 
+[toolchain]
+provider = "mise"
+node = true
+package_manager = "pnpm"
+
 [checks]
-commands = ["git"]
+commands = ["git", "node", "pnpm"]
 http = ["http://127.0.0.1:8000/health", "http://127.0.0.1:5173/"]

@@ -70,6 +70,13 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(DevctlError, "cannot be /"):
                 parse_project(raw)
 
+    def test_invalid_toolchain_provider_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = project_dict(Path(temporary))
+            raw["toolchain"] = {"provider": "unknown"}
+            with self.assertRaisesRegex(DevctlError, "toolchain.provider"):
+                parse_project(raw)
+
 
 if __name__ == "__main__":
     unittest.main()

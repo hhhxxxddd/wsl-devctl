@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 - Unreleased
+
+- Added `system` and `mise` toolchain providers so project workers can honor project-local runtime
+  declarations without depending on interactive shell profiles.
+- Added explicit mise dependency checks and installation through `prepare` or `doctor --fix` while
+  keeping normal startup free of automatic installs and upgrades.
+- Added machine-readable output for `init --dry-run`, `list`, `show`, `status`, and `doctor`.
+- Made root a supported single-user project identity without requiring `runuser` or Docker group
+  membership.
+- Generated direct `pnpm` and Yarn commands instead of routing project execution through Corepack.
+
 ## 0.3.0 - Unreleased
 
 - Added safe `update`, `rename`, and `unregister` commands for the complete project lifecycle.
