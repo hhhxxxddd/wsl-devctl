@@ -131,6 +131,7 @@ Windows 和 WSL 路径都可以使用：
 ```bash
 wsl-devctl init 'C:\Users\you\source\my-app' --dry-run
 wsl-devctl init 'C:\Users\you\source\my-app' --dry-run --json
+wsl-devctl init 'C:\Users\you\source\my-app' --generate-mise --dry-run
 ```
 
 命令只输出自动识别结果和将要生成的 TOML，不修改系统。
@@ -164,6 +165,10 @@ sudo wsl-devctl init 'C:\Users\you\source\my-app' \
 
 `--runtime` 支持 `auto`、`host` 和 `compose`。`--toolchain` 支持 `auto`、`mise` 和
 `system`；自动模式检测到 mise 时优先使用 mise。
+
+安装了独立的 [`dev-tools`](https://github.com/hhhxxxddd/dev-tools) 后，显式加
+`--generate-mise` 会先扫描项目已有版本声明；缺少根级配置时生成 `mise.toml`，已有配置
+则原样保留，版本冲突时停止注册。该参数不能与 `--toolchain system` 同时使用。
 
 ## 日常使用
 
@@ -357,7 +362,7 @@ pnpm = "10"
 ```
 
 `doctor` 会报告缺少声明或尚未安装的版本。只有 `doctor --fix`、`prepare` 和
-`start --prepare` 会执行明确的 `mise install`；普通 `start`、`restart` 和后台热更不会安装、
+`start --prepare` 会安装项目已声明但缺失的版本；普通 `start`、`restart` 和后台热更不会安装、
 升级或切换版本。Maven Wrapper 仍然优先于 mise 或系统 Maven。
 
 Bun 和 uv 不会通过远程 shell 脚本自动下载。Docker Desktop 的 WSL Integration 也需要在

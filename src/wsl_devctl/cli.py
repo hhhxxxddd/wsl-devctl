@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -170,8 +171,38 @@ def _start_project(runtime: RuntimePaths, project: ProjectConfig, *, prepare: bo
         log(f"inspect containers with: wsl-devctl status {project.name}")
 
 
+def _generate_mise_config(source: Path, *, dry_run: bool) -> dict[str, object]:
+    executable = shutil.which("dev-tools")
+    if executable is None:
+        raise DevctlError("--generate-mise requires dev-tools on PATH")
+    command = [executable, "project", "init", str(source), "--json"]
+    if dry_run:
+        command.append("--dry-run")
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    if result.returncode not in (0, 2):
+        detail = (result.stderr or result.stdout).strip()
+        raise DevctlError(f"dev-tools project init failed: {detail or result.returncode}")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise DevctlError("dev-tools returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise DevctlError("dev-tools returned an invalid project report")
+    action = str(payload.get("action", "unknown"))
+    if action == "conflict":
+        raise DevctlError("project version declarations conflict; run dev-tools project scan")
+    return payload
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     detection = discover(args.source, args.runtime)
+    if args.generate_mise and args.toolchain == "system":
+        raise DevctlError("--generate-mise cannot be combined with --toolchain system")
+    mise_report = (
+        _generate_mise_config(detection.source, dry_run=args.dry_run)
+        if args.generate_mise
+        else None
+    )
     name = args.name or default_name(detection.source)
     run_user = args.user or os.environ.get("SUDO_USER") or os.environ.get("USER") or ""
     if not run_user:
@@ -186,13 +217,15 @@ def cmd_init(args: argparse.Namespace) -> None:
         if args.json:
             print(
                 json.dumps(
-                    {"detected": detection.labels(), "config": raw},
+                    {"detected": detection.labels(), "mise": mise_report, "config": raw},
                     ensure_ascii=False,
                     indent=2,
                 )
             )
             return
         print(f"Detected: {', '.join(detection.labels())}", file=sys.stderr)
+        if mise_report is not None:
+            print(f"mise: {mise_report.get('action', 'unknown')}", file=sys.stderr)
         print(content, end="")
         return
     if args.json:
@@ -215,6 +248,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     action = "updated" if updated else "initialized"
     log(f"{action} {project.name}: {destination}")
     log(f"detected: {', '.join(detection.labels())}")
+    if mise_report is not None:
+        log(f"mise: {mise_report.get('action', 'unknown')}")
     if args.fix:
         remaining = apply_dependency_fixes(project)
         if not remaining.empty:
@@ -615,6 +650,11 @@ def parser() -> argparse.ArgumentParser:
     initialize.add_argument("--force", action="store_true")
     initialize.add_argument("--dry-run", action="store_true")
     initialize.add_argument("--json", action="store_true")
+    initialize.add_argument(
+        "--generate-mise",
+        action="store_true",
+        help="generate a project mise.toml through dev-tools before registration",
+    )
     initialize.set_defaults(func=cmd_init)
     register = sub.add_parser("register", help="validate and install a TOML project config")
     register.add_argument("config")

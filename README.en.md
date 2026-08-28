@@ -136,6 +136,7 @@ Windows and WSL paths are both accepted:
 ```bash
 wsl-devctl init 'C:\Users\you\source\my-app' --dry-run
 wsl-devctl init 'C:\Users\you\source\my-app' --dry-run --json
+wsl-devctl init 'C:\Users\you\source\my-app' --generate-mise --dry-run
 ```
 
 This prints the detected stack and generated TOML without changing the system.
@@ -169,6 +170,11 @@ sudo wsl-devctl init 'C:\Users\you\source\my-app' \
 
 `--runtime` accepts `auto`, `host`, or `compose`. `--toolchain` accepts `auto`, `mise`, or
 `system`; auto prefers mise when it is available.
+
+When the independent [`dev-tools`](https://github.com/hhhxxxddd/dev-tools) CLI is installed,
+explicit `--generate-mise` first scans existing project declarations. It creates a missing root
+`mise.toml`, preserves an existing one byte-for-byte, and stops registration on conflicts. It cannot
+be combined with `--toolchain system`.
 
 ## Everyday use
 
@@ -369,8 +375,9 @@ pnpm = "10"
 ```
 
 `doctor` reports missing declarations and uninstalled versions. Only `doctor --fix`, `prepare`, and
-`start --prepare` explicitly run `mise install`; ordinary startup, restart, and live reload never
-install, upgrade, or switch versions. Maven Wrapper still takes precedence over mise or system Maven.
+`start --prepare` install declared project versions that are missing; ordinary startup, restart, and
+live reload never install, upgrade, or switch versions. Maven Wrapper still takes precedence over
+mise or system Maven.
 
 Bun and uv are not downloaded through remote shell scripts. Docker Desktop WSL Integration must
 also be enabled manually in Docker Desktop.

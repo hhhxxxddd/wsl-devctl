@@ -4,6 +4,7 @@ import fcntl
 
 from .config import ProjectConfig
 from .drivers.compose import compose_prepare
+from .drivers.maven import resolve_maven
 from .drivers.spring import classpath_overlay, java_environment, signal_reload
 from .errors import DevctlError
 from .gitstate import GitState
@@ -18,7 +19,15 @@ from .state import (
     write_json,
 )
 from .sync import sync_once
-from .toolchain import exec_project_shell, install_mise_tools, shell_project, uses_mise
+from .toolchain import (
+    exec_project_shell,
+    install_mise_tools,
+    mise_inventory,
+    missing_mise_tools,
+    required_tools,
+    shell_project,
+    uses_mise,
+)
 from .watcher import ChangeKind
 
 UNIT_KINDS = ("sync", "compile", "backend", "frontend", "compose")
@@ -53,7 +62,20 @@ def run_prepare(paths: RuntimePaths, project: ProjectConfig, kind: str) -> None:
 
 def prepare_all(paths: RuntimePaths, project: ProjectConfig) -> None:
     if uses_mise(project):
-        install_mise_tools(project)
+        required = set(required_tools(project))
+        maven = resolve_maven(project)
+        if maven is not None and "/" in maven.executable:
+            required.discard("maven")
+        inventory = mise_inventory(project)
+        undeclared = sorted(required - inventory.keys())
+        if undeclared:
+            raise DevctlError(
+                "mise versions are not declared for: "
+                f"{', '.join(undeclared)}; add a project mise.toml or use dev-tools project init"
+            )
+        missing = missing_mise_tools(project, sorted(required))
+        if missing:
+            install_mise_tools(project, missing)
     if project.runtime_driver == "compose":
         compose_prepare(project)
         return
@@ -207,10 +229,14 @@ def rebuild_after_branch_switch(
     previous: GitState,
     current: GitState,
 ) -> bool:
-    runtime_kinds = ("compose",) if project.runtime_driver == "compose" else (
-        "compile",
-        "frontend",
-        "backend",
+    runtime_kinds = (
+        ("compose",)
+        if project.runtime_driver == "compose"
+        else (
+            "compile",
+            "frontend",
+            "backend",
+        )
     )
     active_before = {kind: unit_active(project.name, kind) for kind in runtime_kinds}
     label = (
