@@ -67,6 +67,7 @@ class ToolchainTests(unittest.TestCase):
             self.assertEqual(args[1], ["/usr/bin/mise", "exec", "--", "node", "--version"])
             self.assertEqual(kwargs["env"]["MISE_AUTO_INSTALL"], "false")
             self.assertEqual(kwargs["env"]["MISE_EXEC_AUTO_INSTALL"], "false")
+            self.assertEqual(kwargs["env"]["MISE_GLOBAL_CONFIG_FILE"], "/dev/null")
             self.assertEqual(kwargs["env"]["MISE_NOT_FOUND_SYSTEM_FALLBACK"], "false")
 
 

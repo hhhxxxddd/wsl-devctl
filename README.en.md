@@ -10,9 +10,10 @@ WSL ext4.
 
 ## Companion Project
 
-[`dev-tools`](https://github.com/hhhxxxddd/dev-tools) manages shared mise declarations, development
-runtimes, and project-level `mise.toml` across Windows and WSL. `wsl-devctl` consumes those
-declarations and focuses on WSL project execution and live reload.
+[`dev-tools`](https://github.com/hhhxxxddd/dev-tools) discovers versions from existing project files,
+generates project-level `mise.toml`, and can explicitly prepare project runtimes. `wsl-devctl`
+consumes project declarations and focuses on WSL execution and live reload. Neither tool depends on
+global default development runtime versions.
 
 ## Why wsl-devctl?
 
@@ -90,6 +91,36 @@ The model has four simple rules:
 This is a control tool for personal WSL development environments. It is not a production
 deployment platform or an all-language toolchain/version manager.
 
+## Commands and help
+
+`help` is the concise Chinese quick reference. `--help` is the complete argument reference. Put
+`--help` after a subcommand to inspect that command:
+
+```bash
+wsl-devctl help
+wsl-devctl --help
+wsl-devctl init --help
+wsl-devctl logs --help
+```
+
+There is no `wsl-devctl help init` form.
+
+| Goal | Command |
+|---|---|
+| Preview project detection | `wsl-devctl init <path> --dry-run` |
+| Generate mise config, register, and start | `sudo wsl-devctl init <path> --generate-mise --fix --start` |
+| List registered projects | `wsl-devctl list` |
+| Inspect configuration and state | `wsl-devctl show <name>` / `wsl-devctl status <name>` |
+| Start, stop, or restart | `sudo wsl-devctl start <name>` / `sudo wsl-devctl stop <name>` / `sudo wsl-devctl restart <name>` |
+| Fully prepare after dependency or branch changes | `sudo wsl-devctl start <name> --prepare` |
+| Read or follow logs | `wsl-devctl logs <name> -n 200` / `wsl-devctl logs <name> -f` |
+| Diagnose; explicitly repair | `wsl-devctl doctor <name>` / `sudo wsl-devctl doctor <name> --fix` |
+| Unregister while preserving source | `sudo wsl-devctl unregister <name>` |
+
+Read-only commands normally do not need `sudo`. Commands that change registration, systemd runtime
+state, synchronization, project preparation, or dependency repair require root. A personal
+single-user WSL may run as root directly.
+
 ## One-minute setup
 
 ### 1. Requirements
@@ -123,8 +154,7 @@ wsl-devctl --help
 wsl-devctl help
 ```
 
-`wsl-devctl help` prints a concise Chinese quick reference. Use `--help` or a subcommand's
-`--help` for the complete argument reference.
+See “Commands and help” above for every help entrypoint.
 
 Installed layout:
 
@@ -370,8 +400,9 @@ node = true
 package_manager = "pnpm"
 ```
 
-- `mise` runs project commands through `mise exec`. Versions come from `mise.toml`, `.mise.toml`,
-  or mise's standard global configuration; `wsl-devctl` does not guess project versions.
+- `mise` runs project commands through `mise exec`. Versions come from the project root
+  `mise.toml` or `.mise.toml`; `wsl-devctl` neither guesses project versions nor relies on global
+  defaults.
 - `system` runs commands directly from the WSL `PATH` for legacy projects and system tools.
 
 Reproducible project versions should be committed to the project repository, for example:

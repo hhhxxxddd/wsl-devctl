@@ -9,8 +9,9 @@
 
 ## 配套项目
 
-[`dev-tools`](https://github.com/hhhxxxddd/dev-tools) 统一管理 Windows/WSL 的 mise 版本声明、
-开发运行时和项目级 `mise.toml`；`wsl-devctl` 消费这些声明，专注于 WSL 项目运行与热更新。
+[`dev-tools`](https://github.com/hhhxxxddd/dev-tools) 从项目已有文件发现版本并生成项目级
+`mise.toml`，也能显式准备项目运行时；`wsl-devctl` 消费项目声明，专注于 WSL 项目运行与
+热更新。两者都不依赖全局默认开发工具版本。
 
 ## 为什么需要 wsl-devctl？
 
@@ -85,6 +86,35 @@ flowchart LR
 它是面向个人 WSL 开发环境的控制工具，不是生产部署平台，也不试图成为包含所有语言版本的
 大型工具链管理器。
 
+## 命令与帮助
+
+`help` 是中文常用命令速查，`--help` 是完整参数参考；查看某个子命令时把 `--help` 放在
+子命令后面：
+
+```bash
+wsl-devctl help
+wsl-devctl --help
+wsl-devctl init --help
+wsl-devctl logs --help
+```
+
+注意：没有 `wsl-devctl help init` 这种形式。
+
+| 目的 | 命令 |
+|---|---|
+| 预览项目识别结果 | `wsl-devctl init <项目路径> --dry-run` |
+| 生成 mise 配置、注册并启动 | `sudo wsl-devctl init <项目路径> --generate-mise --fix --start` |
+| 查看所有注册项目 | `wsl-devctl list` |
+| 查看一个项目的配置与状态 | `wsl-devctl show <名称>` / `wsl-devctl status <名称>` |
+| 启动、停止或重启 | `sudo wsl-devctl start <名称>` / `sudo wsl-devctl stop <名称>` / `sudo wsl-devctl restart <名称>` |
+| 依赖或分支变化后完整准备 | `sudo wsl-devctl start <名称> --prepare` |
+| 查看或跟踪日志 | `wsl-devctl logs <名称> -n 200` / `wsl-devctl logs <名称> -f` |
+| 诊断；显式修复 | `wsl-devctl doctor <名称>` / `sudo wsl-devctl doctor <名称> --fix` |
+| 注销但保留源码 | `sudo wsl-devctl unregister <名称>` |
+
+只读命令通常不需要 `sudo`。注册项目、修改 systemd 运行状态、同步、准备依赖或修复环境的
+命令需要 root；个人单用户 WSL 直接使用 root 也可以。
+
 ## 一分钟上手
 
 ### 1. 准备环境
@@ -118,7 +148,7 @@ wsl-devctl --help
 wsl-devctl help
 ```
 
-`wsl-devctl help` 提供中文常用命令速查；`--help` 和各子命令的 `--help` 提供完整参数。
+命令帮助的完整入口见上面的“命令与帮助”一节。
 
 安装位置：
 
@@ -355,8 +385,8 @@ node = true
 package_manager = "pnpm"
 ```
 
-- `mise`：项目命令通过 `mise exec` 运行。版本由源码目录中的 `mise.toml`、`.mise.toml`
-  或 mise 的标准全局配置声明；`wsl-devctl` 不猜测项目版本。
+- `mise`：项目命令通过 `mise exec` 运行。版本由项目根目录中的 `mise.toml` 或
+  `.mise.toml` 声明；`wsl-devctl` 不猜测项目版本，也不依赖全局默认版本。
 - `system`：直接使用 WSL `PATH` 中的命令，兼容不由 mise 管理的旧项目和系统工具。
 
 推荐把可复现的项目版本提交到项目仓库，例如：

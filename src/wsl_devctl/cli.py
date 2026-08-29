@@ -632,26 +632,32 @@ def cmd_help(_: argparse.Namespace) -> None:
     print(
         """wsl-devctl - Windows 源码 + WSL ext4 开发运行控制器
 
+帮助：
+  wsl-devctl help                         中文常用命令速查
+  wsl-devctl --help                       完整命令列表
+  wsl-devctl <命令> --help                某个命令的完整参数
+
 初始化：
   wsl-devctl init <项目路径> --dry-run
-  wsl-devctl init <项目路径> --generate-mise --fix --start
+  sudo wsl-devctl init <项目路径> --generate-mise --fix --start
 
 常用命令：
   wsl-devctl list                         列出已注册项目
   wsl-devctl status <名称>                查看服务与端口状态
-  wsl-devctl start <名称>                 启动项目
-  wsl-devctl start <名称> --prepare       重新同步、准备依赖并启动
-  wsl-devctl stop <名称>                  停止项目
-  wsl-devctl restart <名称>               重启运行服务
-  wsl-devctl sync <名称>                  手动同步 Windows 源码
-  wsl-devctl prepare <名称>               重新准备项目依赖
+  sudo wsl-devctl start <名称>            启动项目
+  sudo wsl-devctl start <名称> --prepare  重新同步、准备依赖并启动
+  sudo wsl-devctl stop <名称>             停止项目
+  sudo wsl-devctl restart <名称>          重启运行服务
+  sudo wsl-devctl sync <名称>             手动同步 Windows 源码
+  sudo wsl-devctl prepare <名称>          重新准备项目依赖
   wsl-devctl logs <名称> -f               持续查看日志
   wsl-devctl doctor <名称>                诊断环境与项目配置
-  wsl-devctl doctor <名称> --fix          显式修复支持的缺失依赖
+  sudo wsl-devctl doctor <名称> --fix     显式修复支持的缺失依赖
 
 说明：
   Windows 工作区是源码真源，WSL ext4 镜像用于依赖、构建和运行。
   普通 start/restart 不会自动安装或升级开发工具。
+  只读命令通常无需 sudo；改变注册、同步或运行状态的命令需要 root。
   完整参数请使用 wsl-devctl --help 或 wsl-devctl <命令> --help。
 """
     )

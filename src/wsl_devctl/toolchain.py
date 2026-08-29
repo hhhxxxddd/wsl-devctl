@@ -58,6 +58,7 @@ def _mise_environment(
         {
             "MISE_AUTO_INSTALL": "false",
             "MISE_EXEC_AUTO_INSTALL": "false",
+            "MISE_GLOBAL_CONFIG_FILE": "/dev/null",
             "MISE_NOT_FOUND_AUTO_INSTALL": "false",
             "MISE_NOT_FOUND_SYSTEM_FALLBACK": "false",
             "MISE_TRUSTED_CONFIG_PATHS": os.pathsep.join(trusted),
