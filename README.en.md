@@ -8,6 +8,12 @@
 `wsl-devctl` keeps source management on Windows while moving dependencies, builds, and runtimes to
 WSL ext4.
 
+## Companion Project
+
+[`dev-tools`](https://github.com/hhhxxxddd/dev-tools) manages shared mise declarations, development
+runtimes, and project-level `mise.toml` across Windows and WSL. `wsl-devctl` consumes those
+declarations and focuses on WSL project execution and live reload.
+
 ## Why wsl-devctl?
 
 Many Windows developers keep repositories in the Windows filesystem and use WSL to build, run, and
@@ -114,7 +120,11 @@ Verify the installation:
 ```bash
 wsl-devctl --version
 wsl-devctl --help
+wsl-devctl help
 ```
+
+`wsl-devctl help` prints a concise Chinese quick reference. Use `--help` or a subcommand's
+`--help` for the complete argument reference.
 
 Installed layout:
 

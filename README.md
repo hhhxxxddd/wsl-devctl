@@ -7,6 +7,11 @@
 
 `wsl-devctl` 让 Windows 负责保存和管理源码，让 WSL ext4 负责依赖、构建和运行。
 
+## 配套项目
+
+[`dev-tools`](https://github.com/hhhxxxddd/dev-tools) 统一管理 Windows/WSL 的 mise 版本声明、
+开发运行时和项目级 `mise.toml`；`wsl-devctl` 消费这些声明，专注于 WSL 项目运行与热更新。
+
 ## 为什么需要 wsl-devctl？
 
 许多 Windows 开发者习惯把项目保存在 Windows 文件系统中，再通过 WSL 编译、运行和验证。
@@ -110,7 +115,10 @@ sudo bash scripts/install.sh --no-deps
 ```bash
 wsl-devctl --version
 wsl-devctl --help
+wsl-devctl help
 ```
+
+`wsl-devctl help` 提供中文常用命令速查；`--help` 和各子命令的 `--help` 提供完整参数。
 
 安装位置：
 

@@ -60,4 +60,5 @@ install -m 0644 "${repo_root}/README.en.md" /etc/wsl-devctl/README.en.md
 systemctl daemon-reload
 echo "Installed wsl-devctl $(/usr/local/bin/wsl-devctl --version)"
 echo "Create a project with: sudo wsl-devctl init <path> --fix --start"
+echo "Chinese quick reference: wsl-devctl help"
 echo "Existing projects were not registered, started, stopped, or migrated."

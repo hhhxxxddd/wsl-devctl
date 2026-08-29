@@ -3,6 +3,7 @@
 ## 0.5.0 - Unreleased
 
 - Added optional `init --generate-mise` integration with the external `dev-tools` CLI.
+- Added `wsl-devctl help` as a concise Chinese quick reference for common workflows.
 - Refused ambiguous project toolchains instead of silently installing global defaults.
 - Kept Maven Wrapper authoritative and skipped redundant mise Maven installation during prepare.
 
