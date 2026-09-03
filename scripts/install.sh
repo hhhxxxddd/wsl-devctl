@@ -52,6 +52,7 @@ rsync -a --delete "${repo_root}/src/wsl_devctl/" "${install_root}/src/wsl_devctl
 install -m 0755 "${repo_root}/scripts/wsl-devctl" /usr/local/bin/wsl-devctl
 
 install -d -m 0755 /etc/wsl-devctl/projects.d /etc/wsl-devctl/examples /var/lib/wsl-devctl
+install -m 0644 "${repo_root}/config/project-isolation.toml" /etc/wsl-devctl/project-isolation.toml
 install -m 0644 "${repo_root}"/systemd/wsl-dev-*.service /etc/systemd/system/
 install -m 0644 "${repo_root}"/examples/dev-*.toml /etc/wsl-devctl/examples/
 install -m 0644 "${repo_root}/README.md" /etc/wsl-devctl/README.md
