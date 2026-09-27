@@ -23,7 +23,9 @@ def ensure_cache(project: ProjectConfig) -> None:
 def sync_command(project: ProjectConfig, *, itemize: bool) -> list[str]:
     # Revalidate immediately before assembling the destructive command.
     cache = require_descendant(project.cache, project.cache_root, "cache")
-    command = ["rsync", "-a", "--delete", "--delay-updates"]
+    # Windows-native runtime logs/state live below the source tree and must never
+    # be copied into (or deleted from) the WSL build mirror.
+    command = ["rsync", "-a", "--delete", "--delay-updates", "--exclude=/.wsl-devctl/"]
     if itemize:
         command.append("--itemize-changes")
     for pattern in project.section("sync").get("exclude", []):

@@ -1,0 +1,17 @@
+{
+  "name": "my-windows-app",
+  "services": {
+    "backend": {
+      "workdir": ".",
+      "prepare": "npm ci",
+      "run": "npm run dev:server",
+      "port": 9173
+    },
+    "frontend": {
+      "workdir": "frontend",
+      "prepare": "npm ci",
+      "run": "npm run dev -- --host 127.0.0.1",
+      "port": 8173
+    }
+  }
+}

@@ -59,7 +59,8 @@ class MiseCliTests(unittest.TestCase):
             cmd_help(parser().parse_args(["help"]))
 
         value = output.getvalue()
-        self.assertIn("Windows 源码 + WSL ext4", value)
+        self.assertIn("WSL ext4 开发服务控制器", value)
+        self.assertIn("在 WSL 内也可用 win 前缀调用", value)
         self.assertIn("wsl-devctl doctor <名称> --fix", value)
 
 

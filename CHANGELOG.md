@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - Unreleased
+
+- Added Windows-native development services managed from the project's own source tree.
+- Added a PowerShell entry point that lists Win and WSL projects in one table and routes common commands.
+- Aligned PowerShell and native WSL help, command flags, environment prefixes, and project routing.
+- Let the native WSL CLI list all Win/WSL projects and manage Windows services through PowerShell interop.
+- Kept Windows runtime state and logs under each project's `.wsl-devctl/windows/` and excluded them from WSL sync.
+
 ## 0.5.0 - Unreleased
 
 - Added optional `init --generate-mise` integration with the external `dev-tools` CLI.

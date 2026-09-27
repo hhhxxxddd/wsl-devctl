@@ -39,7 +39,7 @@ fi
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 install_root=/opt/wsl-devctl
 
-if [[ -L "${install_root}" || -L "${install_root}/src" ]]; then
+if [[ -L "${install_root}" || -L "${install_root}/src" || -L "${install_root}/scripts" ]]; then
   echo "Refusing to install through a symbolic-link target below ${install_root}" >&2
   exit 1
 fi
@@ -49,6 +49,13 @@ if [[ $(readlink -f "${install_root}/src/wsl_devctl") != "${install_root}/src/ws
   exit 1
 fi
 rsync -a --delete "${repo_root}/src/wsl_devctl/" "${install_root}/src/wsl_devctl/"
+install -d -m 0755 "${install_root}/scripts"
+if [[ $(readlink -f "${install_root}/scripts") != "${install_root}/scripts" ]]; then
+  echo "Unexpected installation target: ${install_root}/scripts" >&2
+  exit 1
+fi
+install -m 0644 "${repo_root}/scripts/wsl-devctl-win.ps1" "${install_root}/scripts/wsl-devctl-win.ps1"
+install -m 0644 "${repo_root}/scripts/wsl-devctl-win-worker.ps1" "${install_root}/scripts/wsl-devctl-win-worker.ps1"
 install -m 0755 "${repo_root}/scripts/wsl-devctl" /usr/local/bin/wsl-devctl
 
 install -d -m 0755 /etc/wsl-devctl/projects.d /etc/wsl-devctl/examples /var/lib/wsl-devctl

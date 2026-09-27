@@ -5,8 +5,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![WSL](https://img.shields.io/badge/WSL-Ubuntu-4EAA25.svg)](https://learn.microsoft.com/windows/wsl/)
 
-`wsl-devctl` keeps source management on Windows while moving dependencies, builds, and runtimes to
-WSL ext4.
+`wsl-devctl` manages WSL and Windows-native development services. WSL mode syncs Windows source
+into ext4 before running; Windows mode runs the project's own development commands in place.
+
+| Environment | Source and dependencies | Service runtime | Live reload |
+|---|---|---|---|
+| **WSL** | Mirror Windows source to WSL ext4; keep dependencies and builds on ext4 | systemd host workers or Docker Compose | Framework HMR/reload or a compiler watcher after sync |
+| **Win** | Run directly in the Windows project directory; no source copy | PowerShell 7 manages project commands | The project's own command, such as Vite HMR or `uvicorn --reload` |
+
+Either CLI entry point can list and manage projects registered in both environments.
+`wsl-devctl list` shows `Name`, `Environment`, and `State`; `win` and `wsl` prefixes choose the
+target explicitly.
 
 ## Companion Project
 
@@ -15,7 +24,7 @@ generates project-level `mise.toml`, and can explicitly prepare project runtimes
 consumes project declarations and focuses on WSL execution and live reload. Neither tool depends on
 global default development runtime versions.
 
-## Why wsl-devctl?
+## Why WSL mode?
 
 Many Windows developers keep repositories in the Windows filesystem and use WSL to build, run, and
 verify them. Running a project directly under `/mnt/c` or `/mnt/d` is convenient, but it introduces
@@ -34,7 +43,7 @@ several problems:
    After AI changes code, the ideal loop is automatic sync, compile or reload, and immediate
    verification—not manual copying, rebuilding, and restarting.
 
-`wsl-devctl` incrementally mirrors Windows source into a WSL ext4 workspace while preserving each
+WSL mode incrementally mirrors Windows source into an ext4 workspace while preserving each
 project's native development experience:
 
 - Next.js, Vite, and React keep native HMR/Fast Refresh.
@@ -42,41 +51,34 @@ project's native development experience:
 - Maven/Spring Boot uses a compiler watcher and DevTools.
 - Docker Compose and other stacks use their own watch or development commands.
 
-This preserves Windows repository management, avoids heavy I/O on mounted drives, and turns live
-reload into an editor-independent environment capability.
+This preserves Windows repository management while avoiding heavy I/O on mounted drives. Projects
+that do not need an ext4 build mirror can use Win mode and their normal local development server.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A["Windows workspace<br/>single source of truth"]
-    B["Incremental sync<br/>rsync + bounded paths"]
-    C["WSL ext4 project mirror<br/>dependencies and output stay in Linux"]
-    D{"Runtime driver"}
-    E["Host mode<br/>systemd-supervised processes"]
-    F["Compose mode<br/>Docker Compose"]
-    G["Frontend<br/>Next.js / Vite / React<br/>native HMR"]
-    H["Python / generic backend<br/>reload / watch command"]
-    I["Java<br/>Maven + Spring DevTools"]
-
-    A -->|save source| B --> C --> D
-    D --> E
-    D --> F
+    A["Windows project directory<br/>source of truth"]
+    A -->|Win| B["Run development command in place<br/>state/logs in .wsl-devctl/windows/"]
+    A -->|WSL| C["Incremental rsync"] --> D["WSL ext4 mirror"]
+    D --> E["systemd host workers"]
+    D --> F["Docker Compose"]
+    B --> G["Native HMR / reload"]
     E --> G
-    E --> H
-    E --> I
-    F -->|project-defined volume / watch| G
-    F -->|project-defined volume / watch| H
+    F --> G
 ```
 
-The model has four simple rules:
+WSL mode follows four rules:
 
 1. The Windows workspace is always authoritative.
 2. The WSL mirror is disposable runtime state and should not be edited directly.
-3. Generated data such as `node_modules`, `.next`, `target`, and `.venv` stays in WSL.
+3. Generated data such as `node_modules`, `.next`, `target`, and `.venv` stays in the WSL mirror.
 4. Each framework keeps its own development mode and reload behavior.
 
 ## Supported projects
+
+The table describes **WSL mode** auto-detection. Win mode uses an explicit
+`wsl-devctl.windows.json` declaration.
 
 | Project type | Auto-detected | Development feedback |
 |---|---:|---|
@@ -88,40 +90,107 @@ The model has four simple rules:
 | Docker Compose | ✅ | Determined by project volumes, watch, and development commands |
 | Other frontend/backend stacks | Manual template | Project-defined `run` / watch command |
 
-This is a control tool for personal WSL development environments. It is not a production
+This is a control tool for personal Windows/WSL development environments. It is not a production
 deployment platform or an all-language toolchain/version manager.
 
-## Commands and help
+## CLI: choosing an environment
 
-`help` is the concise Chinese quick reference. `--help` is the complete argument reference. Put
-`--help` after a subcommand to inspect that command:
+These commands mean the same thing in Windows PowerShell and WSL. A prefix selects the environment
+for **one command**; it does not change a persistent setting:
 
-```bash
-wsl-devctl help
-wsl-devctl --help
-wsl-devctl init --help
-wsl-devctl logs --help
+| Command | Behavior |
+|---|---|
+| `wsl-devctl list` | List all Win/WSL projects with `Name`, `Environment`, and `State`; add `--json` for structured output |
+| `wsl-devctl win list` / `wsl-devctl wsl list` | List only one environment |
+| `wsl-devctl start <name>` | Select the registered environment automatically; WSL wins if both use the same name |
+| `wsl-devctl win start <name>` / `wsl-devctl wsl start <name>` | Select an environment explicitly |
+| `wsl-devctl status <name>` / `stop` / `restart` / `logs` / `prepare` / `unregister` | Also accept automatic or explicit routing |
+
+`up` and `down` are aliases for `start` and `stop`. `help` only prints instructions; it does
+**not** switch environments:
+
+```text
+wsl-devctl help                 # unified quick reference
+wsl-devctl help win             # Windows command help
+wsl-devctl help wsl             # WSL command help
+wsl-devctl win start --help     # Windows start options
+wsl-devctl wsl start --help     # WSL start options
 ```
 
-There is no `wsl-devctl help init` form.
+Registration differs by environment: Win uses `wsl-devctl win register <project-directory>` and
+a root-level JSON file. WSL uses `wsl-devctl wsl init <source-path>` or
+`wsl-devctl wsl register <TOML>`. Commands such as `sync`, `compile`, `doctor`, `update`, and
+`rename` remain WSL-specific and go to WSL without a prefix.
 
-| Goal | Command |
-|---|---|
-| Preview project detection | `wsl-devctl init <path> --dry-run` |
-| Generate mise config, register, and start | `sudo wsl-devctl init <path> --generate-mise --fix --start` |
-| List registered projects | `wsl-devctl list` |
-| Inspect configuration and state | `wsl-devctl show <name>` / `wsl-devctl status <name>` |
-| Start, stop, or restart | `sudo wsl-devctl start <name>` / `sudo wsl-devctl stop <name>` / `sudo wsl-devctl restart <name>` |
-| Fully prepare after dependency or branch changes | `sudo wsl-devctl start <name> --prepare` |
-| Read or follow logs | `wsl-devctl logs <name> -n 200` / `wsl-devctl logs <name> -f` |
-| Diagnose; explicitly repair | `wsl-devctl doctor <name>` / `sudo wsl-devctl doctor <name> --fix` |
-| Unregister while preserving source | `sudo wsl-devctl unregister <name>` |
+Windows commands do not use `sudo`. Changing WSL registrations, systemd state, sync, or
+dependencies requires root. From a WSL terminal, use `sudo wsl-devctl wsl ...` for those actions;
+read-only commands normally need no `sudo`. The PowerShell entry point forwards to WSL without
+automatically elevating. If the default WSL user is not root, run privileged operations from a
+WSL terminal with `sudo`.
 
-Read-only commands normally do not need `sudo`. Commands that change registration, systemd runtime
-state, synchronization, project preparation, or dependency repair require root. A personal
-single-user WSL may run as root directly.
+## Windows-native services
 
-## One-minute setup
+Windows services run **in place** in the project directory, without a source mirror. Create
+`wsl-devctl.windows.json` in the project root; see the full
+[frontend/backend example](examples/wsl-devctl.windows.json). A minimal declaration is:
+
+```json
+{
+  "name": "my-windows-app",
+  "services": {
+    "frontend": {
+      "workdir": ".",
+      "prepare": "npm ci",
+      "run": "npm run dev",
+      "port": 5173
+    }
+  }
+}
+```
+
+`run` is a required PowerShell command. `workdir` defaults to the project root; `prepare` and a
+local TCP `port` are optional. The framework's development command provides live reload;
+`wsl-devctl` does not copy or separately watch Windows source. `status` checks the process and
+optional port. A worker retries a service that exits. Register only trusted projects, since the
+configuration executes commands.
+
+Windows needs PowerShell 7. To make `wsl-devctl` available by name in PowerShell, put this
+function in your PowerShell profile and replace the path with your repository location:
+
+```powershell
+function wsl-devctl { & 'C:\Dev\wsl-devctl\scripts\wsl-devctl.ps1' @args }
+
+wsl-devctl win register 'C:\Dev\my-app'
+wsl-devctl list
+wsl-devctl start my-windows-app
+wsl-devctl status my-windows-app
+wsl-devctl logs my-windows-app -f
+wsl-devctl stop my-windows-app
+```
+
+Only explicit `prepare` or `start --prepare` runs the configured preparation command; the latter
+stops services first. Use `restart` after changing a run command so the worker reloads it.
+`unregister` stops the project and removes its registration while retaining source and local logs.
+State and logs live in `.wsl-devctl/windows/`. Registration adds a local Git `info/exclude` entry
+for a root repository; the project should also ignore `.wsl-devctl/`. The Windows registry is at
+`%LOCALAPPDATA%\wsl-devctl\registry.json`.
+
+Managing the same Windows project from WSL requires WSL interop and Windows PowerShell 7. The WSL
+installer copies companion scripts. `win register` accepts `/mnt/...` paths and converts them to
+Windows paths:
+
+```bash
+wsl-devctl win register /mnt/e/Projects/MyApp
+wsl-devctl list
+wsl-devctl start my-windows-app
+```
+
+Running `scripts/wsl-devctl-win.ps1` by itself does not need WSL; the unified PowerShell entry
+point needs WSL for WSL commands. If WSL interop or `pwsh.exe` is unavailable, merged `list` in
+WSL warns that Windows projects cannot be read. `wsl-devctl` uses an available Python 3.11+ in
+WSL rather than maintaining a private Python; Windows service management needs no Python.
+
+## WSL mode setup
 
 ### 1. Requirements
 
@@ -132,11 +201,17 @@ single-user WSL may run as root directly.
 
 ### 2. Install
 
-Clone and install from WSL:
+Keeping the repository on a Windows drive lets PowerShell call the scripts directly. Using
+`C:\Dev` as an example (choose any Windows workspace), clone from PowerShell:
+
+```powershell
+git clone https://github.com/hhhxxxddd/wsl-devctl.git C:\Dev\wsl-devctl
+```
+
+Then install from the corresponding WSL mount:
 
 ```bash
-git clone https://github.com/hhhxxxddd/wsl-devctl.git
-cd wsl-devctl
+cd /mnt/c/Dev/wsl-devctl
 sudo bash scripts/install.sh
 ```
 
@@ -162,6 +237,7 @@ Installed layout:
 |---|---|
 | Command | `/usr/local/bin/wsl-devctl` |
 | Python source | `/opt/wsl-devctl/src/wsl_devctl` |
+| Windows companion scripts | `/opt/wsl-devctl/scripts/*.ps1` |
 | Project declarations | `/etc/wsl-devctl/projects.d/*.toml` |
 | Controller state | `/var/lib/wsl-devctl` |
 | Default project mirrors | `${HOME}/.cache/wsl-devctl/build` |
@@ -216,7 +292,7 @@ explicit `--generate-mise` first scans existing project declarations. It creates
 `mise.toml`, preserves an existing one byte-for-byte, and stops registration on conflicts. It cannot
 be combined with `--toolchain system`.
 
-## Everyday use
+## Everyday WSL use
 
 Inspect projects, health, and logs:
 
@@ -272,7 +348,7 @@ After dependency, lockfile, POM, branch, or project-structure changes, prefer:
 sudo wsl-devctl start --prepare local-my-app
 ```
 
-## Live reload by stack
+## Live reload in WSL mode
 
 ### Next.js, Vite, and React
 
@@ -308,7 +384,7 @@ sure Windows source reaches that mirror consistently.
 
 See the [Compose example](examples/dev-docker-compose.toml).
 
-## Manual configuration
+## Manual WSL configuration
 
 When automatic detection is not enough, start from a template:
 
@@ -338,7 +414,7 @@ when POMs, lockfiles, dependencies, or prepare commands changed:
 sudo wsl-devctl register --force --prepare /path/to/dev-project.toml
 ```
 
-## Manage registered projects
+## Manage WSL projects
 
 Update an existing registration explicitly by name:
 
@@ -376,7 +452,7 @@ sudo wsl-devctl unregister my-app --purge-cache
 `unregister` stops the project and removes its registration and internal state. It never
 deletes the Windows source workspace.
 
-## Dependencies
+## WSL dependencies
 
 Normal `start`, `stop`, `sync`, and `restart` operations never install software. Only the installer
 and explicit `doctor --fix` calls perform dependency repair:
@@ -425,7 +501,13 @@ also be enabled manually in Docker Desktop.
 
 ## Troubleshooting
 
-Start with three commands:
+For a Windows-native service, start with `wsl-devctl win status <name>` and
+`wsl-devctl win logs <name> -n 200`. If its process runs but the configured `port` is unreachable,
+check the actual listener and port. Run `wsl-devctl win restart <name>` after changing a JSON
+`run` command. For calls from WSL, check WSL interop and Windows `pwsh.exe`. If
+`wsl-devctl win list` reports `INVALID`, inspect the project directory and JSON declaration.
+
+For a WSL project, start with:
 
 ```bash
 wsl-devctl status local-my-app
@@ -452,18 +534,20 @@ partially updated dependency graph. Fix the cause and repeat `start --prepare`.
 
 ## Safety boundaries
 
-- The Windows workspace is the only source of truth; do not edit the WSL mirror directly.
+- The Windows project directory is the source of truth; do not edit the WSL mirror directly.
 - Source, cache root, and cache are validated before bounded `rsync --delete` operations.
 - A cache cannot be `/` or escape its declared root through `..` or symlinks.
-- Project commands run as `run_user`. A personal single-user WSL can use root directly; shared
-  environments can configure an unprivileged user.
+- WSL project commands run as `run_user`; Windows-native projects run as the Windows user issuing
+  the command.
+- `.wsl-devctl/` holds Windows service state/logs and is excluded from WSL sync.
 - Normal startup never installs software silently.
 
 See [Architecture](docs/architecture.md) for the design boundaries.
 
 ## Upgrade and uninstall
 
-After updating the repository, rerun:
+After updating the repository, rerun the WSL installer to refresh both the Python controller and
+Windows companion scripts:
 
 ```bash
 sudo bash scripts/install.sh --no-deps
@@ -476,8 +560,10 @@ sudo wsl-devctl stop local-my-app
 sudo bash scripts/uninstall.sh
 ```
 
-The uninstaller removes the command, installed Python source, and systemd templates. It preserves
-project declarations, state, Maven repositories, and project mirrors to avoid silent data loss.
+The uninstaller removes the WSL command, installed controller/companion scripts, and systemd
+templates. It preserves project declarations, state, Maven repositories, and project mirrors.
+Remove the PowerShell profile function yourself; the uninstaller also leaves each Windows
+project's `.wsl-devctl/windows/` state and logs in place.
 
 ## Development and tests
 
@@ -485,6 +571,12 @@ Run the unit suite inside WSL:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -t . -v
+```
+
+Run the cross-environment smoke test from Windows PowerShell (requires an installed Ubuntu WSL):
+
+```powershell
+& .\tests\test_windows.ps1
 ```
 
 ## License

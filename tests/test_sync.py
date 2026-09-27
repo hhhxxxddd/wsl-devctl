@@ -23,6 +23,7 @@ class SyncTests(unittest.TestCase):
             self.assertEqual((project.cache / "hello.txt").read_text(encoding="utf-8"), "one")
             self.assertFalse((project.cache / "stale.txt").exists())
             command = sync_command(project, itemize=False)
+            self.assertIn("--exclude=/.wsl-devctl/", command)
             self.assertEqual(command[-1], f"{project.cache}/")
 
 

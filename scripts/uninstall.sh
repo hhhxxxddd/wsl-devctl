@@ -12,7 +12,7 @@ if systemctl list-units --state=active --plain --no-legend 'wsl-dev-*@*.service'
   exit 1
 fi
 
-if [[ -L /opt/wsl-devctl || -L /opt/wsl-devctl/src ]]; then
+if [[ -L /opt/wsl-devctl || -L /opt/wsl-devctl/src || -L /opt/wsl-devctl/scripts ]]; then
   echo "Refusing to remove a symbolic-link target below /opt/wsl-devctl" >&2
   exit 1
 fi
@@ -30,7 +30,10 @@ rm -f /etc/systemd/system/wsl-dev-backend@.service
 rm -f /etc/systemd/system/wsl-dev-frontend@.service
 rm -f /etc/systemd/system/wsl-dev-compose@.service
 rm -rf -- /opt/wsl-devctl/src
+rm -f /opt/wsl-devctl/scripts/wsl-devctl-win.ps1
+rm -f /opt/wsl-devctl/scripts/wsl-devctl-win-worker.ps1
+rmdir /opt/wsl-devctl/scripts 2>/dev/null || true
 systemctl daemon-reload
 
-echo "Removed executable, installed Python source, and unit templates."
+echo "Removed executable, installed controller/companion scripts, and unit templates."
 echo "Configuration, state, Maven repositories, and project caches were preserved."

@@ -32,6 +32,7 @@ from .state import branch_failure_path, read_json, resource_recovery_path
 from .sync import ensure_cache, sync_once
 from .tomlgen import render_toml
 from .workers import dispatch_worker
+from .windows import run_windows, windows_projects
 
 
 def paths() -> RuntimePaths:
@@ -409,6 +410,7 @@ def cmd_list(args: argparse.Namespace) -> None:
             values.append(
                 {
                     "name": project.name,
+                    "environment": "wsl",
                     "state": states,
                     "valid": True,
                     "runtime": project.runtime_driver,
@@ -419,21 +421,32 @@ def cmd_list(args: argparse.Namespace) -> None:
             values.append(
                 {
                     "name": path.stem,
+                    "environment": "wsl",
                     "state": [],
                     "valid": False,
                     "error": str(exc),
                 }
             )
+    if not getattr(args, "wsl_only", False):
+        try:
+            values.extend(windows_projects())
+        except DevctlError as exc:
+            print(f"wsl-devctl: Windows projects unavailable: {exc}", file=sys.stderr)
+    values.sort(key=lambda value: (str(value["name"]), str(value["environment"])))
     if args.json:
         print(json.dumps(values, ensure_ascii=False, indent=2))
         return
+    if values:
+        width = max(len("Name"), *(len(str(value["name"])) for value in values))
+        print(f"{'Name':<{width}}  Environment  State")
+        print(f"{'-' * width}  -----------  -----")
     for value in values:
-        if value["valid"]:
-            states = value["state"]
-            label = ",".join(states) if isinstance(states, list) and states else "stopped"
-            print(f"{value['name']}\t{label}")
-        else:
-            print(f"{value['name']}\tINVALID: {value['error']}")
+        states = value["state"]
+        label = (
+            ",".join(states) if isinstance(states, list) and states else "stopped"
+        ) if value["valid"] else f"INVALID: {value['error']}"
+        environment = "Win" if value["environment"] == "win" else "WSL"
+        print(f"{str(value['name']):<{width}}  {environment:<11}  {label}")
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
@@ -628,9 +641,14 @@ def cmd_worker(args: argparse.Namespace) -> None:
     dispatch_worker(runtime, load_project(args.name, runtime), args.kind)
 
 
-def cmd_help(_: argparse.Namespace) -> None:
+def cmd_help(args: argparse.Namespace) -> None:
+    if args.topic == "win":
+        result = run_windows(["help"])
+        if result.returncode:
+            raise DevctlError("Could not show Windows companion help")
+        return
     print(
-        """wsl-devctl - Windows 源码 + WSL ext4 开发运行控制器
+        """wsl-devctl - WSL ext4 开发服务控制器（WSL 原生命令）
 
 帮助：
   wsl-devctl help                         中文常用命令速查
@@ -642,7 +660,12 @@ def cmd_help(_: argparse.Namespace) -> None:
   sudo wsl-devctl init <项目路径> --generate-mise --fix --start
 
 常用命令：
-  wsl-devctl list                         列出已注册项目
+  wsl-devctl list                         表格列出全部 Win/WSL 项目
+  wsl-devctl list --json                  输出全部项目 JSON
+  wsl-devctl win register /mnt/c/项目路径  注册 Windows 原生项目
+  wsl-devctl win start <名称>              明确启动 Windows 服务
+  wsl-devctl wsl start <名称>              明确启动 WSL 服务
+  wsl-devctl start <名称>                  根据注册环境自动选择
   wsl-devctl status <名称>                查看服务与端口状态
   sudo wsl-devctl start <名称>            启动项目
   sudo wsl-devctl start <名称> --prepare  重新同步、准备依赖并启动
@@ -656,6 +679,9 @@ def cmd_help(_: argparse.Namespace) -> None:
 
 说明：
   Windows 工作区是源码真源，WSL ext4 镜像用于依赖、构建和运行。
+  Windows 原生服务通过 Windows PowerShell 7 执行；在 WSL 内也可用 win 前缀调用。
+  WSL 与 Windows PowerShell 两侧的 list 都会合并 Win/WSL 项目。
+  同名项目默认选 WSL；显式使用 win 前缀可选择 Windows。
   普通 start/restart 不会自动安装或升级开发工具。
   只读命令通常无需 sudo；改变注册、同步或运行状态的命令需要 root。
   完整参数请使用 wsl-devctl --help 或 wsl-devctl <命令> --help。
@@ -666,12 +692,20 @@ def cmd_help(_: argparse.Namespace) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         prog="wsl-devctl",
-        description="Run Windows-hosted projects from WSL ext4 build caches.",
+        description=(
+            "Manage WSL ext4 and Windows-native development services. Use 'win' to select "
+            "Windows explicitly."
+        ),
     )
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = result.add_subparsers(dest="command", required=True)
     chinese_help = sub.add_parser("help", help="show concise Chinese usage guidance")
+    chinese_help.add_argument("topic", nargs="?", choices=("win", "wsl"))
     chinese_help.set_defaults(func=cmd_help)
+    windows = sub.add_parser("win", help="manage Windows-native services through WSL interop")
+    windows.set_defaults(func=lambda _: None)  # main forwards win arguments before argparse
+    wsl = sub.add_parser("wsl", help="explicitly select WSL services")
+    wsl.set_defaults(func=lambda _: None)  # main strips the prefix before argparse
     initialize = sub.add_parser("init", help="detect, configure, and optionally start a project")
     initialize.add_argument("source")
     initialize.add_argument("--name")
@@ -711,7 +745,7 @@ def parser() -> argparse.ArgumentParser:
     unregister.add_argument("name")
     unregister.add_argument("--purge-cache", action="store_true")
     unregister.set_defaults(func=cmd_unregister)
-    listing = sub.add_parser("list", help="list registered projects")
+    listing = sub.add_parser("list", help="list registered WSL projects with environment and state")
     listing.add_argument("--json", action="store_true")
     listing.set_defaults(func=cmd_list)
     for name, func in (
@@ -758,7 +792,28 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     try:
+        if len(sys.argv) >= 2 and sys.argv[1] == "win":
+            raise SystemExit(run_windows(sys.argv[2:]).returncode)
+        force_wsl = len(sys.argv) >= 2 and sys.argv[1] == "wsl"
+        if force_wsl:
+            sys.argv = [sys.argv[0], *sys.argv[2:]]
         args = parser().parse_args()
+        args.wsl_only = force_wsl
+        if not force_wsl and args.command in {
+            "start", "up", "stop", "down", "restart", "status", "show", "logs",
+            "prepare", "unregister",
+        } and not paths().config_path(args.name).is_file():
+            try:
+                windows = windows_projects()
+            except DevctlError:
+                windows = []
+            if any(project.get("name") == args.name for project in windows):
+                forwarded = list(sys.argv[1:])
+                if forwarded[0] == "up":
+                    forwarded[0] = "start"
+                elif forwarded[0] == "down":
+                    forwarded[0] = "stop"
+                raise SystemExit(run_windows(forwarded).returncode)
         args.func(args)
     except DevctlError as exc:
         print(f"wsl-devctl: {exc}", file=sys.stderr)
