@@ -2,6 +2,13 @@
 
 ## 0.6.0 - Unreleased
 
+- Track Windows application phases and exit codes; do not report unprobed or crash-looping services as healthy.
+- Verify that configured TCP listeners belong to the managed process tree.
+- Allow stopping Windows workers with missing or invalid project configurations.
+- Preserve the caller's environment when launching detached Windows workers.
+- Keep WSL systemd workloads alive after Windows start commands exit; release the hidden session when all development units stop.
+- Accept JSON integer ports on PowerShell 7 and flush running command output to logs.
+
 - Added Windows-native development services managed from the project's own source tree.
 - Added a PowerShell entry point that lists Win and WSL projects in one table and routes common commands.
 - Aligned PowerShell and native WSL help, command flags, environment prefixes, and project routing.

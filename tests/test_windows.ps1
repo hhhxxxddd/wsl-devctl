@@ -25,13 +25,14 @@ try {
             }
         }
     }
-    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $project 'wsl-devctl.windows.json')
+    $configPath = Join-Path $project 'wsl-devctl.windows.json'
+    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
     $linuxProject = '/mnt/' + $project.Substring(0, 1).ToLowerInvariant() +
         $project.Substring(2).Replace('\', '/')
     & wsl.exe -d Ubuntu -- wsl-devctl win register $linuxProject
     Assert ($LASTEXITCODE -eq 0) 'WSL could not register Windows project'
     Assert (Test-Path -LiteralPath (Join-Path $project '.wsl-devctl/windows')) 'runtime directory missing'
-    Assert ((& $router help) -match 'Win/WSL') 'unified help omitted both environments'
+    Assert (((& $router help) -join "`n") -match 'Win/WSL') 'unified help omitted both environments'
     Assert ((& $router win list --help) -match 'win list') 'Windows subcommand help failed'
     Assert ((& $router list --help) -match 'combined Win/WSL') 'combined list help failed'
     $listed = @(& $router list --json | ConvertFrom-Json)
@@ -47,6 +48,8 @@ try {
     Assert (Test-Path -LiteralPath (Join-Path $project 'prepared.txt')) 'prepare command did not run'
     $status = & $router status $name --json | ConvertFrom-Json
     Assert ($status.services[0].active) 'Windows worker did not start'
+    Assert ($status.services[0].phase -eq 'running') 'application phase missing'
+    Assert ($null -eq $status.services[0].healthy) 'no probe must not imply healthy'
     $wslStatus = & wsl.exe -d Ubuntu -- wsl-devctl status $name --json | ConvertFrom-Json
     Assert ($wslStatus.services[0].active) 'native WSL command did not route Windows status'
     Start-Sleep -Seconds 2
@@ -58,6 +61,70 @@ try {
     & $router stop $name
     $status = & $router status $name --json | ConvertFrom-Json
     Assert (-not $status.services[0].active) 'Windows worker did not stop'
+
+    # A crashing command leaves the supervisor alive, but never healthy.
+    $configuration.services.backend.run = "throw 'intentional smoke failure'"
+    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+    & $cli start $name
+    Start-Sleep -Seconds 1
+    $status = & $cli status $name --json | ConvertFrom-Json
+    Assert ($status.services[0].phase -eq 'restarting') 'crash not reported as restarting'
+    Assert ($status.services[0].healthy -eq $false) 'crashing application reported healthy'
+    Assert ($status.services[0].exit_code -eq 1) 'crash exit code missing'
+    # Stop remains available when the workdir, JSON, or entire config is broken.
+    $configuration.services.backend.workdir = 'missing-directory'
+    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+    $lastPid = [int]$status.services[0].pid
+    & $cli stop $name
+    Assert (-not (Get-Process -Id $lastPid -ErrorAction SilentlyContinue)) 'invalid workdir prevented stop'
+    $configuration.services.backend.workdir = '.'
+    $configuration.services.backend.run = 'while ($true) { Write-Output alive; Start-Sleep -Seconds 1 }'
+    foreach ($broken in @('invalid-json', 'deleted')) {
+        $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+        & $cli start $name
+        $status = & $cli status $name --json | ConvertFrom-Json
+        $lastPid = [int]$status.services[0].pid
+        if ($broken -eq 'deleted') { Remove-Item -LiteralPath $configPath }
+        else { Set-Content -LiteralPath $configPath -Value '{invalid' }
+        & $cli stop $name
+        Assert (-not (Get-Process -Id $lastPid -ErrorAction SilentlyContinue)) "$broken prevented stop"
+    }
+    # An unrelated listener must not make a service healthy.
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        $configuration.services.backend.port = $listener.LocalEndpoint.Port
+        $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+        & $cli start $name
+        $status = & $cli status $name --json | ConvertFrom-Json
+        Assert ($status.services[0].reachable) 'test listener unreachable'
+        Assert (-not $status.services[0].healthy) 'unrelated listener reported healthy'
+        & $cli stop $name
+    } finally { $listener.Stop() }
+    # A native child that really owns its port is healthy, and stops with its parent.
+    $testPort = $configuration.services.backend.port
+    @'
+param([int]$Port)
+$server = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $Port)
+$server.Start()
+try { while ($true) { Write-Output child-alive; Start-Sleep -Milliseconds 100 } }
+finally { $server.Stop() }
+'@ | Set-Content -LiteralPath (Join-Path $project 'listener.ps1')
+    $configuration.services.backend.run = "& (Join-Path `$PSHOME 'pwsh.exe') -NoProfile -File ./listener.ps1 -Port $testPort"
+    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+    & $cli start $name
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        $status = & $cli status $name --json | ConvertFrom-Json
+        if ($status.services[0].healthy) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    Assert ($status.services[0].healthy) 'owned child port not healthy'
+    $childPid = @(Get-NetTCPConnection -State Listen -LocalPort $testPort)[0].OwningProcess
+    & $cli stop $name
+    Assert (-not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) 'stop left native child alive'
+    $configuration.services.backend.Remove('port')
+    $configuration.services.backend.run = 'while ($true) { Write-Output alive; Start-Sleep -Seconds 1 }'
+    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
     & wsl.exe -d Ubuntu -- wsl-devctl up $name
     Assert ($LASTEXITCODE -eq 0) 'native WSL command did not route Windows up'
     $status = & $router status $name --json | ConvertFrom-Json

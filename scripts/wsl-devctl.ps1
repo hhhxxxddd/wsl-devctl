@@ -3,6 +3,26 @@ $ErrorActionPreference = 'Stop'
 $win = Join-Path $PSScriptRoot 'wsl-devctl-win.ps1'
 $distro = if ($env:WSL_DEVCTL_DISTRO) { $env:WSL_DEVCTL_DISTRO } else { 'Ubuntu' }
 
+function Start-WslKeepAlive {
+    $script = Join-Path $PSScriptRoot 'wsl-devctl-keepalive.sh'
+    $linuxScript = & wsl.exe -d $distro --exec wslpath -u $script.Replace('\', '/')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not locate WSL keepalive script' }
+    $wrapper = Join-Path $PSScriptRoot 'wsl-devctl-keepalive.ps1'
+    $arguments = '-NoProfile -NonInteractive -File "' + $wrapper + '" -Distro "' + $distro +
+        '" -LinuxScript "' + ([string]$linuxScript).Trim() + '"'
+    $existing = @(Get-CimInstance Win32_Process -Filter "Name = 'pwsh.exe'" |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($arguments) })
+    if (-not $existing.Count) {
+        # Detach from short-lived terminal/agent process trees, like Windows workers.
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+        $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine = '"' + (Join-Path $PSHOME 'pwsh.exe') + '" ' + $arguments
+            ProcessStartupInformation = $startup
+        }
+        if ($result.ReturnValue -ne 0) { throw "Could not keep WSL running (WMI code $($result.ReturnValue))" }
+    }
+}
+
 function Get-WslProjects {
     $raw = & wsl.exe -d $distro -- wsl-devctl wsl list --json
     if ($LASTEXITCODE -ne 0) { throw 'Could not list WSL projects' }
@@ -77,8 +97,13 @@ if ($args.Count -gt 0 -and $args[0] -eq 'win') {
 }
 
 if ($args[0] -eq 'wsl') {
+    if ($args.Count -gt 1 -and $args[1] -in @('start', 'up', 'restart') -and
+        $args -notcontains '--help' -and $args -notcontains '-h') { Start-WslKeepAlive }
     & wsl.exe -d $distro -- wsl-devctl @args
-    exit $LASTEXITCODE
+    $resultCode = $LASTEXITCODE
+    if ($resultCode -eq 0 -and $args.Count -gt 1 -and $args[1] -in @('start', 'up', 'restart') -and
+        $args -notcontains '--help' -and $args -notcontains '-h') { Start-WslKeepAlive }
+    exit $resultCode
 }
 
 if ($args -contains '--help' -or $args -contains '-h') {
@@ -139,5 +164,8 @@ if ($args[0] -in @('start', 'up', 'stop', 'down', 'restart', 'status', 'show', '
     }
 }
 
+if ($args[0] -in @('start', 'up', 'restart')) { Start-WslKeepAlive }
 & wsl.exe -d $distro -- wsl-devctl @args
-exit $LASTEXITCODE
+$resultCode = $LASTEXITCODE
+if ($resultCode -eq 0 -and $args[0] -in @('start', 'up', 'restart')) { Start-WslKeepAlive }
+exit $resultCode

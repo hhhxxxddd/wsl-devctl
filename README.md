@@ -141,7 +141,10 @@ Windows 服务在项目目录**原地运行**，不建立源码镜像。先在�
 
 `run` 是必填的 PowerShell 命令；`workdir` 默认为项目根目录，`prepare` 和本地 TCP
 `port` 可选。热更新由 `run` 启动的框架开发模式提供，工具本身不额外复制或监视 Windows
-源码。`status` 根据进程和可选端口判断健康状态；服务退出后会尝试重新启动。配置会执行命令，
+源码。`status` 区分 `starting`、`running`、`restarting`、`stopped` 等状态，并显示退出码。
+未配置端口时健康状态为未知（JSON 中为 `null`）；配置端口时还检查监听进程属于当前服务进程树。
+`active` 仅表示守护进程存活，不代表应用健康。服务退出后会尝试重新启动。
+即使配置损坏、删除或工作目录不存在，`stop` 仍可依据运行记录停止服务。配置会执行命令，
 只注册可信项目。
 
 Windows 上需要 PowerShell 7。若想在 PowerShell 中直接输入 `wsl-devctl`，将下面的函数
@@ -172,6 +175,10 @@ wsl-devctl win register /mnt/e/Projects/MyApp
 wsl-devctl list
 wsl-devctl start my-windows-app
 ```
+
+从统一 PowerShell 入口启动 WSL 服务时，会创建隐藏的 WSL 保活会话，避免终端退出后
+WSL 空闲回收导致 systemd 服务停止。全部 `wsl-dev-*` 服务停止后，保活会话自动退出。
+直接在 WSL 终端启动时，仍需保留 WSL 会话；这不是开机自启动配置。
 
 单独运行 `scripts/wsl-devctl-win.ps1` 不需要 WSL；统一 PowerShell 入口的 WSL 命令则需要
 WSL 可用。若 WSL interop 或 `pwsh.exe` 不可用，WSL 的合并 `list` 会提示 Windows 项目

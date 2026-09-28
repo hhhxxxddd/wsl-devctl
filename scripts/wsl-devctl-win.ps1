@@ -65,7 +65,7 @@ function Get-Config([string]$projectPath) {
             throw "Service '$service' needs a run command"
         }
         $null = Get-Workdir $projectPath $item
-        if ($item.Contains('port') -and ($item.port -isnot [int] -or $item.port -lt 1 -or $item.port -gt 65535)) {
+        if ($item.Contains('port') -and (($item.port -isnot [int] -and $item.port -isnot [long]) -or $item.port -lt 1 -or $item.port -gt 65535)) {
             throw "Invalid port for service '$service'"
         }
     }
@@ -138,15 +138,43 @@ function Test-Port([int]$port) {
 
 function Get-ServiceStatus([string]$projectPath, [string]$service, [System.Collections.IDictionary]$item) {
     $process = Get-RunningProcess $projectPath $service
+    $runtime = $null
+    try {
+        $candidate = Get-Content -LiteralPath (Join-Path (Get-StateDir $projectPath) "$service.runtime") -Raw | ConvertFrom-Json
+        if ($process -and $candidate.pid -eq $process.Id -and
+            $candidate.start_ticks -eq $process.StartTime.ToUniversalTime().Ticks) { $runtime = $candidate }
+    } catch { }
+    $phase = if (-not $process) { 'stopped' } elseif ($runtime) { $runtime.phase } else { 'unknown' }
     $port = if ($item.Contains('port')) { [int]$item.port } else { $null }
     $reachable = if ($null -ne $port) { Test-Port $port } else { $null }
+    $owned = $false
+    if ($process -and $reachable) {
+        # A different application listening on the configured port is not our health check.
+        $tree = [Collections.Generic.HashSet[int]]::new()
+        $null = $tree.Add($process.Id)
+        $all = @(Get-CimInstance Win32_Process)
+        do {
+            $added = $false
+            foreach ($child in $all) {
+                if ($tree.Contains([int]$child.ParentProcessId) -and
+                    $child.CreationDate -ge $process.StartTime -and $tree.Add([int]$child.ProcessId)) { $added = $true }
+            }
+        } while ($added)
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+        $owned = @($listeners | Where-Object { $tree.Contains([int]$_.OwningProcess) }).Count -gt 0
+    }
+    $healthy = if ($phase -ne 'running') { $false } elseif ($null -eq $port) { $null } else { $reachable -and $owned }
     return [pscustomobject]@{
         service = $service
         active = ($null -ne $process)
         pid = if ($process) { $process.Id } else { $null }
         port = $port
         reachable = $reachable
-        healthy = (($null -ne $process) -and ($null -eq $port -or $reachable))
+        phase = $phase
+        exit_code = if ($runtime) { $runtime.exit_code } else { $null }
+        error = if ($runtime) { $runtime.error } else { $null }
+        port_owned = $owned
+        healthy = $healthy
     }
 }
 
@@ -177,7 +205,10 @@ function Start-Service([string]$projectPath, [string]$service, [System.Collectio
     }
     # WMI creates the worker outside the WSL interop process tree. Otherwise an
     # invocation from WSL waits for the long-running Windows child to exit.
-    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    $environment = @(Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" })
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+        ShowWindow = [uint16]0; EnvironmentVariables = [string[]]$environment
+    }
     $commandLine = '"' + (Join-Path $PSHOME 'pwsh.exe') + '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
         $worker + '" -ProjectPath "' + $projectPath + '" -Service ' + $service
     $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
@@ -208,6 +239,7 @@ function Stop-Service([string]$projectPath, [string]$service) {
     }
     else { Write-Host "$service already stopped" }
     Remove-Item -LiteralPath (Get-StatePath $projectPath $service) -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path (Get-StateDir $projectPath) "$service.runtime") -Force -ErrorAction SilentlyContinue
 }
 
 function Get-KnownServices([string]$projectPath, [string[]]$configured) {
@@ -370,6 +402,10 @@ try {
         return
     }
     $projectPath = Get-ProjectPath $name
+    if ($action -eq 'stop') {
+        foreach ($service in @(Get-KnownServices $projectPath @())) { Stop-Service $projectPath $service }
+        return
+    }
     $config = Get-Config $projectPath
     if ([string]$config.name -cne $name) { throw 'Registered name differs from project config' }
     $services = @($config.services.Keys | Sort-Object)
@@ -383,7 +419,7 @@ try {
             $report = Get-ProjectReport $name $projectPath
             if ($options.Contains('--json')) { Write-Json $report }
             else {
-                $report.services | Select-Object Service, Active, Pid, Port, Reachable, Healthy |
+                $report.services | Select-Object Service, Phase, Active, Pid, Port, Reachable, Healthy |
                     Format-Table -AutoSize
                 Write-Host "Runtime: $(Join-Path $projectPath '.wsl-devctl/windows')"
             }
